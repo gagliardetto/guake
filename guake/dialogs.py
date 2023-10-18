@@ -2,7 +2,9 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
-
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio
+from gi.repository import Vte
 
 class RenameDialog(Gtk.Dialog):
     def __init__(self, window, current_name):
@@ -143,19 +145,12 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
         self.parent_window = window
 
     def run(self):
-        self.terminal.select_all()
-        self.terminal.copy_clipboard()
-        self.terminal.unselect_all()
-        clipboard = Gtk.Clipboard.get_default(self.parent_window.get_display())
-        selection = clipboard.wait_for_text()
-        if not selection:
-            return
-        selection = selection.rstrip()
+        vte_terminal = self.terminal  # Assuming self.terminal is a VTE Terminal object
+ 
         filter = Gtk.FileFilter()
         filter.set_name(_("All files"))
         filter.add_pattern("*")
         self.add_filter(filter)
-
         filter = Gtk.FileFilter()
         filter.set_name(_("Text and Logs"))
         filter.add_pattern("*.log")
@@ -164,7 +159,32 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
 
         response = super().run()
         if response == Gtk.ResponseType.OK:
+            # Get the filename
             filename = self.get_filename()
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(selection)
+            # Create a new stream to write to
+            output_stream = Gio.MemoryOutputStream.new_resizable()
+
+            # Write the contents of the terminal to the stream
+            flags = Vte.WriteFlags.DEFAULT
+            vte_terminal.write_contents_sync(
+                output_stream, flags, None
+            )
+            # Close the stream
+            output_stream.close()
+
+            # Steal the data as GLib.Bytes
+            written_data = output_stream.steal_as_bytes()
+
+            # Create a Gio.File object for the destination
+            file = Gio.File.new_for_path(filename)
+
+            # Write the contents
+            file.replace_contents_bytes_async(
+                written_data,
+                None,
+                False,
+                Gio.FileCreateFlags.REPLACE_DESTINATION,
+                None,
+                lambda file, result: file.replace_contents_finish(result),
+            )
         self.destroy()
