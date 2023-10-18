@@ -1277,7 +1277,7 @@ msgid "Save content..."
 msgstr "Salva il contenuto..."
 
 #: guake/menus.py:90
-msgid "Copy content to clipboard" 
+msgid "Copy content to clipboard"
 msgstr "Copia il contenuto negli appunti"
 
 #: guake/menus.py:97

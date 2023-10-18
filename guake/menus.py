@@ -87,7 +87,7 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
     mi.set_sensitive(clipboard.wait_is_text_available())
     menu.add(mi)
     menu.add(Gtk.SeparatorMenuItem())
-    mi = Gtk.MenuItem(_("Copy content..."))
+    mi = Gtk.MenuItem(_("Copy content to clipboard"))
     mi.connect("activate", callback_object.on_save_to_clipboard)
     menu.add(mi)
     mi = Gtk.MenuItem(_("Save content..."))
