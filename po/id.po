@@ -1531,5 +1531,74 @@ msgstr ""
 msgid "Line Width Scale (VTE >= 0.52)"
 msgstr ""
 
+#: guake/main.py:207
+msgid ""
+"Return the index of the tab with the given terminal UUID, -1 if not found"
+msgstr ""
+
+#: guake/main.py:250
+msgid ""
+"Split the selected tab vertically. Optional input split percentage for the "
+"width."
+msgstr ""
+
+#: guake/main.py:264
+msgid ""
+"Split the selected tab horizontally. Optional input split percentage for the "
+"height."
+msgstr ""
+
+#: guake/main.py:274
+msgid "Execute an arbitrary command in a new tab."
+msgstr ""
+
+#: guake/prefs.py:107
+msgid "New tab in current directory"
+msgstr ""
+
+#: guake/prefs.py:184
+msgid "Select all"
+msgstr ""
+
+#: guake/prefs.py:194
+msgid "Open URL under terminal cursor"
+msgstr ""
+
+#: guake/data/prefs.glade:275
+msgid "Load settings from `cwd`/.guake.yml"
+msgstr ""
+
+#: guake/data/prefs.glade:710
+msgid "Search Engine:"
+msgstr ""
+
+#: guake/data/prefs.glade:724
+msgid "Google"
+msgstr ""
+
+#: guake/data/prefs.glade:725
+msgid "DuckDuckGo"
+msgstr ""
+
+#: guake/data/prefs.glade:726
+msgid "Bing"
+msgstr ""
+
+#: guake/data/prefs.glade:727
+msgid "Yandex"
+msgstr ""
+
+#: guake/data/prefs.glade:728
+msgid "Neeva"
+msgstr ""
+
+#: guake/data/prefs.glade:755
+msgid "Custom Search:"
+msgstr ""
+
+#: guake/data/prefs.glade:769
+msgid "www.google.com/search?q=<search is inserted here>"
+msgstr ""
+
 #~ msgid "http://guake.org"
 #~ msgstr "http://guake.org"
