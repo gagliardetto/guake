@@ -1022,6 +1022,14 @@ msgstr "Teilen ｜"
 msgid "Save content..."
 msgstr "Inhalt speichern..."
 
+#: guake/menus.py:75
+msgid "Copy content to clipboard"
+msgstr "Inhalt in die Zwischenablage kopieren"
+
+#: guake/menus.py:78
+msgid "Copy CWD"
+msgstr "Aktuelles Verzeichnis kopieren"
+
 #: data/prefs.glade:1182
 msgid ""
 "This might not work on all shells, make sure that your shell supports the --"
