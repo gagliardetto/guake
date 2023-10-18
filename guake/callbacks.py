@@ -11,7 +11,9 @@ from guake.utils import FullscreenManager
 from guake.utils import HidePrevention
 from guake.utils import get_server_time
 from urllib.parse import quote_plus
-
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio
+from gi.repository import Vte
 
 class TerminalContextMenuCallbacks:
     def __init__(self, terminal, window, settings, notebook):
@@ -37,6 +39,36 @@ class TerminalContextMenuCallbacks:
 
     def on_save_to_file(self, *args):
         SaveTerminalDialog(self.terminal, self.window).run()
+
+    def on_save_to_clipboard(self, *args):
+        vte_terminal = self.terminal  # Assuming self.terminal is a VTE Terminal object
+        # Create a new stream to write to
+        output_stream = Gio.MemoryOutputStream.new_resizable()
+
+        # Write the contents of the terminal to the stream
+        flags = Vte.WriteFlags.DEFAULT
+        vte_terminal.write_contents_sync(
+            output_stream, flags, None
+        )
+        # Close the stream
+        output_stream.close()
+
+        # Steal the data as GLib.Bytes
+        written_data = output_stream.steal_as_bytes()
+
+        # Convert GLib.Bytes to string
+        written_text = written_data.get_data().decode('utf-8')
+
+        # save the data to the clipboard
+        clipboard = Gtk.Clipboard.get_default(self.window.get_display())
+        clipboard.set_text(written_text, -1)
+
+    def on_copy_cwd(self, *args):
+        # get the current working directory
+        cwd = self.terminal.get_current_directory()
+        # save the data to the clipboard
+        clipboard = Gtk.Clipboard.get_default(self.window.get_display())
+        clipboard.set_text(cwd, -1)
 
     def on_reset_terminal(self, *args):
         self.terminal.reset(True, True)
