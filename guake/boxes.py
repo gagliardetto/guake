@@ -393,8 +393,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.terminal = None
-        self.minimap_content_height = 0  # Used for minimap
-        self.minimap_page_height = 0  # Used for minimap
 
     def set_terminal(self, terminal):
         """Packs the terminal widget."""
@@ -451,17 +449,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(2)
 
-        self.minimap_content_height = 0  # Reset minimap_content_height before drawing new content
-
-        rows_per_page = self.terminal.get_row_count()
-
-        self.minimap_page_height = rows_per_page * 3  # Reset minimap_page_height before drawing new content
-
         if hasattr(self, 'terminal_content'):
             # Here, implement your logic to represent self.terminal_content
             # For example, you might simply draw the first few lines
             lines = self.terminal_content.split('\n')
-            self.minimap_content_height = 3 * len(lines)  # Reset minimap_content_height before drawing new content
             for i, line in enumerate(lines):
                 if line == '':
                     continue
@@ -472,9 +463,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         
         # Draw the scrolling viewfinder
         self.draw_viewfinder(cr)
-        print("minimap_content_height: ", self.minimap_content_height)
-        print("minimap_page_height: ", self.minimap_page_height)
-        print("rows_per_page: ", rows_per_page)
 
     def get_minimap_row_height(self):
         return 3
@@ -497,7 +485,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         # Calculate the y coordinate of the viewfinder
         viewfinder_y = value * self.get_minimap_row_height()
         print("viewfinder_y: ", viewfinder_y)
-        # the height of the viewfinder should be = minimap_page_height
 
         # Draw the viewfinder
         cr.set_source_rgba(1, 1, 1, 0.5)
