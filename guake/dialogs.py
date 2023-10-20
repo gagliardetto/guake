@@ -204,12 +204,18 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.list_box = Gtk.ListBox()
         self.selected_page = None
 
-        screen_height = Gdk.Screen.get_default().get_height()
-        one_third_height = screen_height // 3
+        screen = Gdk.Screen.get_default()
+        screen_width = screen.get_width()
+        screen_height = screen.get_height()
 
-        # Assume each row has a height of 30 pixels
-        row_height = 30
+        one_third_width = screen_width // 3
+        one_third_height = screen_height // 3
+        row_height = 30  # Assumed height for each row
+
         min_height = one_third_height + row_height
+
+        # Set minimum width of the dialog to one-third of the screen width
+        self.set_default_size(one_third_width, -1)
 
         # Create a scrolled window
         scrolled_window = Gtk.ScrolledWindow()
