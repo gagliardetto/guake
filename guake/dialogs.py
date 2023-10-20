@@ -191,10 +191,24 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
         self.destroy()
 
 class MyListBoxRow(Gtk.ListBoxRow):
-    def __init__(self, label, page_index):
+    def __init__(self, tab_label, tab_cwd, page_index):
         super().__init__()
         self.page_index = page_index
-        self.add(Gtk.Label(label=label))
+
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=50)
+
+        label = Gtk.Label()
+        label.set_markup(f"<span font_desc='Arial Bold 14'>{tab_label}</span>")
+        label.set_xalign(0)
+
+        cwd = Gtk.Label()
+        cwd.set_markup(f"<span font_desc='Arial 14'>{tab_cwd}</span>")
+        cwd.set_xalign(1)
+
+        hbox.pack_start(label, True, True, 0)
+        hbox.pack_end(cwd, True, True, 0)
+
+        self.add(hbox)
 
 class QuickTabNavigationDialog(Gtk.Dialog):
     def __init__(self, window, notebook_manager):
@@ -242,12 +256,10 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         # Populate list_box
         for notebook in notebook_manager.iter_notebooks():
             for terminal in notebook.iter_terminals():
-                old_label = notebook.get_tab_label(notebook.get_nth_page(page_index))
-                tab_label = old_label.get_text()  # replace with actual method to get label
-                tab_cwd = terminal.get_current_directory()  # replace with actual method to get CWD
+                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
+                tab_cwd = terminal.get_current_directory() 
 
-                label_text = f"{tab_label} - {tab_cwd}"
-                row = MyListBoxRow(label_text, page_index)
+                row = MyListBoxRow(tab_label, tab_cwd, page_index)
                 self.list_box.add(row)
 
                 page_index += 1
@@ -258,15 +270,19 @@ class QuickTabNavigationDialog(Gtk.Dialog):
 
 
     def on_entry_changed(self, widget):
-        # Filtering logic here
-        filter_text = widget.get_text()
+        filter_text = widget.get_text().lower()
         for row in self.list_box.get_children():
-            label = row.get_child()
-            if filter_text.lower() in label.get_text().lower():
+            hbox = row.get_child()
+            label, cwd = hbox.get_children()
+            label_text = label.get_text().lower()
+            cwd_text = cwd.get_text().lower()
+
+            if filter_text in label_text or filter_text in cwd_text:
                 row.show()
             else:
                 row.hide()
         self.update_visible_rows()
+
 
     def update_visible_rows(self):
         self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
