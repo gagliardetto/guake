@@ -199,31 +199,43 @@ class QuickTabNavigationDialog(Gtk.Dialog):
             (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
              Gtk.STOCK_OK, Gtk.ResponseType.OK)
         )
-        
+
         self.entry = Gtk.Entry()
         self.list_box = Gtk.ListBox()
-        self.selected_page = None  # To hold the selected tab index
-        
-        # Add widgets to dialog
+        self.selected_page = None
+
+        screen_height = Gdk.Screen.get_default().get_height()
+        one_third_height = screen_height // 3
+
+        # Assume each row has a height of 30 pixels
+        row_height = 30
+        min_height = one_third_height + row_height
+
+        # Create a scrolled window
+        scrolled_window = Gtk.ScrolledWindow()
+        scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scrolled_window.add(self.list_box)
+        scrolled_window.set_min_content_height(min_height)
+
         box = self.get_content_area()
         box.add(self.entry)
-        box.add(self.list_box)
-        
-        # Connect events
+        box.add(scrolled_window)
+
         self.entry.connect("changed", self.on_entry_changed)
         self.list_box.connect("key-press-event", self.on_key_press)
-        
-        # Populate list_box with tabs (for demo, replace this with real data)
-        for i in range(5):
+
+        # Populate list_box
+        for i in range(30):
             row = Gtk.ListBoxRow()
             rand = random.randint(0, 100)
             label = Gtk.Label(label=f"Tab {i} - {rand}")
             row.add(label)
             self.list_box.add(row)
-        
+
         self.show_all()
-        self.visible_rows = []  # List to keep track of visible rows
+        self.visible_rows = []
         self.update_visible_rows()
+
 
     def on_entry_changed(self, widget):
         # Filtering logic here
