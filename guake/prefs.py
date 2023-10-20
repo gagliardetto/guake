@@ -107,6 +107,7 @@ HOTKEYS = [
             {"key": "new-tab-cwd", "label": _("New tab in current directory")},
             {"key": "close-tab", "label": _("Close tab")},
             {"key": "rename-current-tab", "label": _("Rename current tab")},
+            {"key": "quick-tab-navigation", "label": _("Quick tab navigation")},
         ],
     },
     {

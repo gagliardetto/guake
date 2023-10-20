@@ -52,6 +52,7 @@ from guake.about import AboutDialog
 from guake.common import gladefile
 from guake.common import pixmapfile
 from guake.dialogs import PromptQuitDialog
+from guake.dialogs import QuickTabNavigationDialog
 from guake.globals import MAX_TRANSPARENCY
 from guake.globals import NAME
 from guake.globals import PROMPT_ALWAYS
@@ -1071,6 +1072,22 @@ class Guake(SimpleGladeApp):
         page_num = self.get_notebook().get_current_page()
         page = self.get_notebook().get_nth_page(page_num)
         self.get_notebook().get_tab_label(page).on_rename(None)
+        return True
+
+    def accel_quick_tab_navigation(self, *args):
+        """Callback to show the quick tab navigation dialog. Called by the accel
+        key.
+        """
+        # show the quick tab navigation dialog QuickTabNavigationDialog, where the user can type the
+        # filter string to select a tab by name or current directory
+        HidePrevention(self.window).prevent()
+        dialog = QuickTabNavigationDialog(self.get_notebook().guake.window)
+        r = dialog.run()
+        if r == Gtk.ResponseType.OK:
+            dialog.close()
+            self.get_notebook().set_current_page(dialog.selected_page)
+        dialog.destroy()
+        HidePrevention(self.window).allow()
         return True
 
     def accel_copy_clipboard(self, *args):

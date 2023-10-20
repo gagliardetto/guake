@@ -1,7 +1,7 @@
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
@@ -188,3 +188,41 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
                 lambda file, result: file.replace_contents_finish(result),
             )
         self.destroy()
+
+class QuickTabNavigationDialog(Gtk.Dialog):
+    # a simple dialog to show the quick tab navigation dialog, where there is an input field that acts as a filter for the tabs,
+    # and a list of tabs that can be selected with the keyboard
+
+    # for demo purposes, show a hello world dialog.
+    def __init__(self, window):
+        super().__init__(
+            _("Quick Tab Navigation"),
+            window,
+            Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+            (
+                Gtk.STOCK_CANCEL,
+                Gtk.ResponseType.CANCEL,
+                Gtk.STOCK_OK,
+                Gtk.ResponseType.OK,
+            ),
+        )
+
+        self.entry = Gtk.Entry()
+        self.entry.set_text("")
+        self.entry.set_property("can-default", True)
+        self.entry.show()
+
+        vbox = Gtk.VBox()
+        vbox.set_border_width(6)
+        vbox.show()
+
+        self.set_size_request(300, -1)
+        self.vbox.pack_start(vbox, True, True, 0)
+        self.set_border_width(4)
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.add_action_widget(self.entry, Gtk.ResponseType.OK)
+        self.entry.reparent(vbox)
+
+    def get_text(self):
+        return self.entry.get_text()
+ 
