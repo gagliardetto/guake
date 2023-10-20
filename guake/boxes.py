@@ -412,7 +412,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.terminal.show()
         self.add_scroll_bar()
 
-        self.minimap.connect("draw", self.on_draw)
+        self.minimap.connect("draw", self.on_draw_minimap)
 
     def add_scroll_bar(self):
         """Packs the scrollbar."""
@@ -439,7 +439,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             self.terminal.connect("contents-changed", self.on_terminal_content_changed, self.minimap)
         )
 
-    def on_draw(self, widget, cr):
+    def on_draw_minimap(self, widget, cr):
         # Get dimensions
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
