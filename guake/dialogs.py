@@ -5,7 +5,7 @@ from gi.repository import Gtk, Gdk
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
-import random
+from gi.repository import Pango
 
 class RenameDialog(Gtk.Dialog):
     def __init__(self, window, current_name):
@@ -190,25 +190,32 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
             )
         self.destroy()
 
+
 class MyListBoxRow(Gtk.ListBoxRow):
     def __init__(self, tab_label, tab_cwd, page_index):
         super().__init__()
         self.page_index = page_index
 
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=50)
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_margin_start(10)  # Adds 10 pixels of padding to the start of the grid
+        grid.set_margin_end(10)    # Adds 10 pixels of padding to the end of the grid
 
         label = Gtk.Label()
         label.set_markup(f"<span font_desc='Arial Bold 14'>{tab_label}</span>")
         label.set_xalign(0)
+        label.set_hexpand(True)
 
         cwd = Gtk.Label()
         cwd.set_markup(f"<span font_desc='Arial 14'>{tab_cwd}</span>")
         cwd.set_xalign(1)
+        cwd.set_hexpand(True)
+        cwd.set_ellipsize(Pango.EllipsizeMode.START)
 
-        hbox.pack_start(label, True, True, 0)
-        hbox.pack_end(cwd, True, True, 0)
+        grid.attach(label, 0, 0, 1, 1)
+        grid.attach_next_to(cwd, label, Gtk.PositionType.RIGHT, 1, 1)
 
-        self.add(hbox)
+        self.add(grid)
 
 class QuickTabNavigationDialog(Gtk.Dialog):
     def __init__(self, window, notebook_manager):
@@ -228,14 +235,14 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         screen_width = screen.get_width()
         screen_height = screen.get_height()
 
-        one_third_width = screen_width // 3
+        four_fifths_width = screen_width // 5 * 4
         one_third_height = screen_height // 3
         row_height = 30  # Assumed height for each row
 
         min_height = one_third_height + row_height
 
         # Set minimum width of the dialog to one-third of the screen width
-        self.set_default_size(one_third_width, -1)
+        self.set_default_size(four_fifths_width, -1)
 
         # Create a scrolled window
         scrolled_window = Gtk.ScrolledWindow()
