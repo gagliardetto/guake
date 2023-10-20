@@ -1081,11 +1081,11 @@ class Guake(SimpleGladeApp):
         # show the quick tab navigation dialog QuickTabNavigationDialog, where the user can type the
         # filter string to select a tab by name or current directory
         HidePrevention(self.window).prevent()
-        dialog = QuickTabNavigationDialog(self.get_notebook().guake.window)
+        dialog = QuickTabNavigationDialog(self.get_notebook().guake.window, self.notebook_manager)
         r = dialog.run()
         if r == Gtk.ResponseType.OK:
             dialog.close()
-            self.get_notebook().set_current_page(dialog.selected_page)
+            self.get_notebook().set_current_page(dialog.get_selected_page())
         dialog.destroy()
         HidePrevention(self.window).allow()
         return True

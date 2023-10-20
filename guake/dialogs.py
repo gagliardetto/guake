@@ -190,8 +190,14 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
             )
         self.destroy()
 
+class MyListBoxRow(Gtk.ListBoxRow):
+    def __init__(self, label, page_index):
+        super().__init__()
+        self.page_index = page_index
+        self.add(Gtk.Label(label=label))
+
 class QuickTabNavigationDialog(Gtk.Dialog):
-    def __init__(self, window):
+    def __init__(self, window, notebook_manager):
         super().__init__(
             _("Quick Tab Navigation"),
             window,
@@ -229,13 +235,23 @@ class QuickTabNavigationDialog(Gtk.Dialog):
 
         self.entry.connect("changed", self.on_entry_changed)
         self.list_box.connect("key-press-event", self.on_key_press)
+        self.list_box.connect("row-selected", self.on_row_selected)
 
         # Populate list_box
         for i in range(30):
-            row = Gtk.ListBoxRow()
             rand = random.randint(0, 100)
-            label = Gtk.Label(label=f"Tab {i} - {rand}")
-            row.add(label)
+            row = MyListBoxRow(f"Tab {i} - {rand}", i)
+            self.list_box.add(row)
+
+        terminals = notebook_manager.iter_terminals()
+        # iterate and ket index
+        for page_index, terminal in enumerate(terminals):
+            print(dir(terminal))
+            tab_label = "demo label"  # replace with actual method to get label
+            tab_cwd = terminal.get_current_directory()  # replace with actual method to get CWD
+
+            label_text = f"{tab_label} - {tab_cwd}"
+            row = MyListBoxRow(label_text, page_index)
             self.list_box.add(row)
 
         self.show_all()
@@ -278,5 +294,12 @@ class QuickTabNavigationDialog(Gtk.Dialog):
     def get_selected_page(self):
         selected_row = self.list_box.get_selected_row()
         if selected_row:
-            return selected_row.get_index()
+            page_num = selected_row.page_index
         return None
+
+    def on_row_selected(self, listbox, row):
+        if row:
+            self.selected_page = row.page_index
+    
+    def get_selected_page(self):
+        return self.selected_page
