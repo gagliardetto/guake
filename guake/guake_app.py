@@ -1083,7 +1083,7 @@ class Guake(SimpleGladeApp):
         HidePrevention(self.window).prevent()
         dialog = QuickTabNavigationDialog(self.get_notebook().guake.window, self.notebook_manager)
         r = dialog.run()
-        if r == Gtk.ResponseType.OK:
+        if r == Gtk.ResponseType.OK and dialog.get_selected_page() is not None:
             dialog.close()
             self.get_notebook().set_current_page(dialog.get_selected_page())
         dialog.destroy()
