@@ -306,6 +306,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
             if selected_row and self.visible_rows and selected_row == self.visible_rows[0]:
                 self.list_box.unselect_row(selected_row)
                 self.entry.grab_focus()
+                self.entry.set_position(-1)
         elif event.keyval == Gdk.KEY_Down:
             if not filter_text and self.visible_rows:  # Filter box empty
                 if selected_row == self.visible_rows[-1]:
@@ -313,6 +314,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
                 self.list_box.select_row(self.visible_rows[0])
             elif filter_text and not self.visible_rows:  # No matches for filter
                 self.entry.grab_focus()
+                self.entry.set_position(-1)
 
     def get_selected_page(self):
         selected_row = self.list_box.get_selected_row()
