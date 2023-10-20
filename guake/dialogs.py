@@ -237,22 +237,20 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.list_box.connect("key-press-event", self.on_key_press)
         self.list_box.connect("row-selected", self.on_row_selected)
 
+        page_index = 0
+
         # Populate list_box
-        for i in range(30):
-            rand = random.randint(0, 100)
-            row = MyListBoxRow(f"Tab {i} - {rand}", i)
-            self.list_box.add(row)
+        for notebook in notebook_manager.iter_notebooks():
+            for terminal in notebook.iter_terminals():
+                old_label = notebook.get_tab_label(notebook.get_nth_page(page_index))
+                tab_label = old_label.get_text()  # replace with actual method to get label
+                tab_cwd = terminal.get_current_directory()  # replace with actual method to get CWD
 
-        terminals = notebook_manager.iter_terminals()
-        # iterate and ket index
-        for page_index, terminal in enumerate(terminals):
-            print(dir(terminal))
-            tab_label = "demo label"  # replace with actual method to get label
-            tab_cwd = terminal.get_current_directory()  # replace with actual method to get CWD
+                label_text = f"{tab_label} - {tab_cwd}"
+                row = MyListBoxRow(label_text, page_index)
+                self.list_box.add(row)
 
-            label_text = f"{tab_label} - {tab_cwd}"
-            row = MyListBoxRow(label_text, page_index)
-            self.list_box.add(row)
+                page_index += 1
 
         self.show_all()
         self.visible_rows = []
