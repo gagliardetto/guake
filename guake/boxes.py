@@ -393,6 +393,8 @@ class TerminalBox(Gtk.Box, TerminalHolder):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.terminal = None
+        self.minimap_content_height = 0  # Used for minimap
+        self.minimap_page_height = 0  # Used for minimap
 
     def set_terminal(self, terminal):
         """Packs the terminal widget."""
@@ -449,16 +451,59 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(2)
 
+        self.minimap_content_height = 0  # Reset minimap_content_height before drawing new content
+
+        rows_per_page = self.terminal.get_row_count()
+
+        self.minimap_page_height = rows_per_page * 3  # Reset minimap_page_height before drawing new content
+
         if hasattr(self, 'terminal_content'):
             # Here, implement your logic to represent self.terminal_content
             # For example, you might simply draw the first few lines
             lines = self.terminal_content.split('\n')
+            self.minimap_content_height = 3 * len(lines)  # Reset minimap_content_height before drawing new content
             for i, line in enumerate(lines):
                 if line == '':
                     continue
-                cr.move_to(0, i * 3)
-                cr.show_text(line)
-    
+                y_coordinate = i * 3
+                cr.move_to(0, y_coordinate)
+                clean_line = line.replace('\x00', '')
+                cr.show_text(clean_line)
+        
+        # Draw the scrolling viewfinder
+        self.draw_viewfinder(cr)
+        print("minimap_content_height: ", self.minimap_content_height)
+        print("minimap_page_height: ", self.minimap_page_height)
+        print("rows_per_page: ", rows_per_page)
+
+    def get_minimap_row_height(self):
+        return 3
+
+    def draw_viewfinder(self, cr):
+        adj = self.terminal.get_vadjustment()
+        page_size = adj.get_page_size()
+        page_increment = adj.get_page_increment()
+        upper = adj.get_upper() # the total number of rows in the terminal
+        lower = adj.get_lower() # the number of rows above the top of the terminal
+        value = adj.get_value() # the number of rows above the top of the terminal
+        print("page_size: ", page_size)
+        print("page_increment: ", page_increment)
+        print("upper: ", upper)
+        print("lower: ", lower)
+        print("value: ", value)
+        # Calculate the height of the viewfinder
+        viewfinder_height = page_increment * self.get_minimap_row_height()
+        print("viewfinder_height: ", viewfinder_height)
+        # Calculate the y coordinate of the viewfinder
+        viewfinder_y = value * self.get_minimap_row_height()
+        print("viewfinder_y: ", viewfinder_y)
+        # the height of the viewfinder should be = minimap_page_height
+
+        # Draw the viewfinder
+        cr.set_source_rgba(1, 1, 1, 0.5)
+        cr.rectangle(0, viewfinder_y, self.minimap.get_allocated_width(), viewfinder_height)
+        cr.fill()
+
     def on_terminal_content_changed(self, terminal, minimap):
         # Your existing code to get terminal contents
         output_stream = Gio.MemoryOutputStream.new_resizable()
@@ -487,6 +532,9 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         else:
             # Mouse Scroll
             adj.set_page_increment(page_size)
+
+        # Invalidate the existing minimap drawing so the viewfinder will be redrawn
+        self.minimap.queue_draw()
 
     def get_terminal(self):
         return self.terminal
