@@ -250,6 +250,9 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         scrolled_window.add(self.list_box)
         scrolled_window.set_min_content_height(min_height)
 
+        self.entry.set_placeholder_text("Search or filter tabs...")
+        self.entry.set_hexpand(True)
+
         box = self.get_content_area()
         box.add(self.entry)
         box.add(scrolled_window)
