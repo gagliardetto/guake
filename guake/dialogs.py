@@ -198,16 +198,16 @@ class MyListBoxRow(Gtk.ListBoxRow):
 
         grid = Gtk.Grid()
         grid.set_column_spacing(10)
-        grid.set_margin_start(10)  # Adds 10 pixels of padding to the start of the grid
-        grid.set_margin_end(10)    # Adds 10 pixels of padding to the end of the grid
+        grid.set_margin_start(20)  # Adds 20 pixels of padding to the start of the grid
+        grid.set_margin_end(20)    # Adds 20 pixels of padding to the end of the grid
 
         label = Gtk.Label()
-        label.set_markup(f"<span font_desc='Arial Bold 14'>{tab_label}</span>")
+        label.set_markup(f"<span font_desc='Iosevka, Arial, Helvetica, sans-serif Bold 15'>{tab_label}</span>")
         label.set_xalign(0)
         label.set_hexpand(True)
 
         cwd = Gtk.Label()
-        cwd.set_markup(f"<span font_desc='Arial 14'>{tab_cwd}</span>")
+        cwd.set_markup(f"<span font_desc='Iosevka Term, Arial, Helvetica, sans-serif 15'>{tab_cwd}</span>")
         cwd.set_xalign(1)
         cwd.set_hexpand(True)
         cwd.set_ellipsize(Pango.EllipsizeMode.START)
