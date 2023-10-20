@@ -5,6 +5,7 @@ from gi.repository import Gtk, Gdk
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
+import random
 
 class RenameDialog(Gtk.Dialog):
     def __init__(self, window, current_name):
@@ -190,39 +191,72 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
         self.destroy()
 
 class QuickTabNavigationDialog(Gtk.Dialog):
-    # a simple dialog to show the quick tab navigation dialog, where there is an input field that acts as a filter for the tabs,
-    # and a list of tabs that can be selected with the keyboard
-
-    # for demo purposes, show a hello world dialog.
     def __init__(self, window):
         super().__init__(
             _("Quick Tab Navigation"),
             window,
-            Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-            (
-                Gtk.STOCK_CANCEL,
-                Gtk.ResponseType.CANCEL,
-                Gtk.STOCK_OK,
-                Gtk.ResponseType.OK,
-            ),
+            Gtk.DialogFlags.MODAL,
+            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+             Gtk.STOCK_OK, Gtk.ResponseType.OK)
         )
-
+        
         self.entry = Gtk.Entry()
-        self.entry.set_text("")
-        self.entry.set_property("can-default", True)
-        self.entry.show()
+        self.list_box = Gtk.ListBox()
+        self.selected_page = None  # To hold the selected tab index
+        
+        # Add widgets to dialog
+        box = self.get_content_area()
+        box.add(self.entry)
+        box.add(self.list_box)
+        
+        # Connect events
+        self.entry.connect("changed", self.on_entry_changed)
+        self.list_box.connect("key-press-event", self.on_key_press)
+        
+        # Populate list_box with tabs (for demo, replace this with real data)
+        for i in range(5):
+            row = Gtk.ListBoxRow()
+            rand = random.randint(0, 100)
+            label = Gtk.Label(label=f"Tab {i} - {rand}")
+            row.add(label)
+            self.list_box.add(row)
+        
+        self.show_all()
+        self.visible_rows = []  # List to keep track of visible rows
+        self.update_visible_rows()
 
-        vbox = Gtk.VBox()
-        vbox.set_border_width(6)
-        vbox.show()
+    def on_entry_changed(self, widget):
+        # Filtering logic here
+        filter_text = widget.get_text()
+        for row in self.list_box.get_children():
+            label = row.get_child()
+            if filter_text.lower() in label.get_text().lower():
+                row.show()
+            else:
+                row.hide()
+        self.update_visible_rows()
 
-        self.set_size_request(300, -1)
-        self.vbox.pack_start(vbox, True, True, 0)
-        self.set_border_width(4)
-        self.set_default_response(Gtk.ResponseType.OK)
-        self.add_action_widget(self.entry, Gtk.ResponseType.OK)
-        self.entry.reparent(vbox)
+    def update_visible_rows(self):
+        self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
+        
+    def on_key_press(self, widget, event):
+        filter_text = self.entry.get_text()
+        if event.keyval == Gdk.KEY_Return:
+            self.selected_page = self.get_selected_page()
+            self.response(Gtk.ResponseType.OK)
+        elif event.keyval == Gdk.KEY_Up:
+            selected_row = self.list_box.get_selected_row()
+            if selected_row and self.visible_rows and selected_row == self.visible_rows[0]:
+                self.list_box.unselect_row(selected_row)
+                self.entry.grab_focus()
+        elif event.keyval == Gdk.KEY_Down:
+            if not filter_text and self.visible_rows:  # Filter box empty
+                self.list_box.select_row(self.visible_rows[0])
+            elif filter_text and not self.visible_rows:  # No matches for filter
+                self.entry.grab_focus()
 
-    def get_text(self):
-        return self.entry.get_text()
- 
+    def get_selected_page(self):
+        selected_row = self.list_box.get_selected_row()
+        if selected_row:
+            return selected_row.get_index()
+        return None
