@@ -255,7 +255,8 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         box.add(scrolled_window)
 
         self.entry.connect("changed", self.on_entry_changed)
-        self.list_box.connect("key-press-event", self.on_key_press)
+        self.entry.connect("key-press-event", self.on_key_press_in_entry)
+        self.list_box.connect("key-press-event", self.on_key_press_on_row)
         self.list_box.connect("row-selected", self.on_row_selected)
         self.list_box.connect("row-activated", self.on_row_activated)
 
@@ -295,7 +296,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
     def update_visible_rows(self):
         self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
         
-    def on_key_press(self, widget, event):
+    def on_key_press_on_row(self, widget, event):
         filter_text = self.entry.get_text()
         selected_row = self.list_box.get_selected_row()
         if event.keyval == Gdk.KEY_Return:
@@ -329,3 +330,10 @@ class QuickTabNavigationDialog(Gtk.Dialog):
     def on_row_activated(self, listbox, row):
         self.selected_page = row.page_index
         self.response(Gtk.ResponseType.OK)
+
+    def on_key_press_in_entry(self, widget, event):
+        if event.keyval == Gdk.KEY_Return:
+            if len(self.visible_rows) == 1:
+                self.list_box.select_row(self.visible_rows[0])
+                self.selected_page = self.visible_rows[0].page_index
+                self.response(Gtk.ResponseType.OK)
