@@ -241,16 +241,18 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         
     def on_key_press(self, widget, event):
         filter_text = self.entry.get_text()
+        selected_row = self.list_box.get_selected_row()
         if event.keyval == Gdk.KEY_Return:
             self.selected_page = self.get_selected_page()
             self.response(Gtk.ResponseType.OK)
         elif event.keyval == Gdk.KEY_Up:
-            selected_row = self.list_box.get_selected_row()
             if selected_row and self.visible_rows and selected_row == self.visible_rows[0]:
                 self.list_box.unselect_row(selected_row)
                 self.entry.grab_focus()
         elif event.keyval == Gdk.KEY_Down:
             if not filter_text and self.visible_rows:  # Filter box empty
+                if selected_row == self.visible_rows[-1]:
+                    return  # Prevent going past the last item
                 self.list_box.select_row(self.visible_rows[0])
             elif filter_text and not self.visible_rows:  # No matches for filter
                 self.entry.grab_focus()
