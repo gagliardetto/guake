@@ -257,6 +257,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.entry.connect("changed", self.on_entry_changed)
         self.list_box.connect("key-press-event", self.on_key_press)
         self.list_box.connect("row-selected", self.on_row_selected)
+        self.list_box.connect("row-activated", self.on_row_activated)
 
         page_index = 0
 
@@ -324,3 +325,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
     
     def get_selected_page(self):
         return self.selected_page
+
+    def on_row_activated(self, listbox, row):
+        self.selected_page = row.page_index
+        self.response(Gtk.ResponseType.OK)
