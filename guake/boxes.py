@@ -449,14 +449,34 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(2)
 
+        adj = self.terminal.get_vadjustment()
+        first_visible_row = adj.get_value() # the number of rows above the top of the terminal
+        total_rows = adj.get_upper() # the total number of rows in the terminal
+        how_many_rows_fit_in_minimap = height / self.get_minimap_row_height()
+        print("how_many_rows_fit_in_minimap: ", how_many_rows_fit_in_minimap)
+        # determine the starting row to draw
+        starting_row = int(first_visible_row)
+        if total_rows < how_many_rows_fit_in_minimap:
+            starting_row = 0
+        elif starting_row + how_many_rows_fit_in_minimap > total_rows:
+            starting_row = first_visible_row
+            # but if we're at the bottom of the terminal, we want to draw the last few rows
+            if total_rows - starting_row < how_many_rows_fit_in_minimap:
+                starting_row = total_rows - how_many_rows_fit_in_minimap
+        print("starting_row: ", starting_row)
+        
         if hasattr(self, 'terminal_content'):
             # Here, implement your logic to represent self.terminal_content
             # For example, you might simply draw the first few lines
             lines = self.terminal_content.split('\n')
+            drawn_lines = 0
             for i, line in enumerate(lines):
+                if i < starting_row:
+                    continue
                 if line == '':
                     continue
-                y_coordinate = i * 3
+                y_coordinate = drawn_lines * 3
+                drawn_lines += 1
                 cr.move_to(0, y_coordinate)
                 clean_line = line.replace('\x00', '')
                 cr.show_text(clean_line)
@@ -484,6 +504,11 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         print("viewfinder_height: ", viewfinder_height)
         # Calculate the y coordinate of the viewfinder
         viewfinder_y = value * self.get_minimap_row_height()
+        print("viewfinder_y: ", viewfinder_y)
+
+        # fix viewfinder_y 
+        if viewfinder_y + viewfinder_height > upper * self.get_minimap_row_height():
+            viewfinder_y = upper * self.get_minimap_row_height() - viewfinder_height
         print("viewfinder_y: ", viewfinder_y)
 
         # Draw the viewfinder
