@@ -61,6 +61,9 @@ class TerminalHolder:
     def remove_dead_child(self, child):
         raise NotImplementedError
 
+import cairo
+import random
+import string
 
 class RootTerminalBox(Gtk.Overlay, TerminalHolder):
     def __init__(self, guake, parent_notebook):
@@ -409,16 +412,64 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.terminal.show()
         self.add_scroll_bar()
 
+        self.minimap.connect("draw", self.on_draw)
+
     def add_scroll_bar(self):
         """Packs the scrollbar."""
         adj = self.terminal.get_vadjustment()
         self.scroll = Gtk.Scrollbar.new(Gtk.Orientation.VERTICAL, adj)
         self.scroll.show()
-        self.pack_start(self.scroll, False, False, 0)
+
+        # Your minimap setup code here
+        self.minimap = Gtk.DrawingArea()
+        self.minimap.set_size_request(110, 100)  # for example
+        self.minimap.show()
+
+        container = Gtk.HBox()  # Container to hold both scrollbar and minimap
+        container.pack_start(self.minimap, False, False, 0)
+        container.pack_start(self.scroll, False, False, 0)
+        container.show()
+
+        self.pack_start(container, False, False, 0)  # Pack container instead of just the scrollbar
 
         self.terminal.handler_ids.append(
-            self.terminal.connect("scroll-event", self.__scroll_event_cb)
+            self.terminal.connect("scroll-event", self.__scroll_event_cb),
         )
+        self.terminal.handler_ids.append(
+            self.terminal.connect("contents-changed", self.on_terminal_content_changed, self.minimap)
+        )
+
+    def on_draw(self, widget, cr):
+        # Get dimensions
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+
+        # Set Cairo properties (e.g., font, font size)
+        cr.set_source_rgb(0, 1, 0)  # Green text
+        cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(2)
+
+        if hasattr(self, 'terminal_content'):
+            # Here, implement your logic to represent self.terminal_content
+            # For example, you might simply draw the first few lines
+            lines = self.terminal_content.split('\n')
+            for i, line in enumerate(lines):
+                if line == '':
+                    continue
+                cr.move_to(0, i * 3)
+                cr.show_text(line)
+    
+    def on_terminal_content_changed(self, terminal, minimap):
+        # Your existing code to get terminal contents
+        output_stream = Gio.MemoryOutputStream.new_resizable()
+        flags = Vte.WriteFlags.DEFAULT
+        self.terminal.write_contents_sync(output_stream, flags, None)
+        output_stream.close()
+        written_data = output_stream.steal_as_bytes()
+        self.terminal_content = written_data.get_data().decode('utf-8')
+        
+        # Invalidate the existing minimap drawing so it will be redrawn
+        self.minimap.queue_draw()
 
     def __scroll_event_cb(self, widget, event):
         # Adjust scrolling speed when adding "shift" or "shift + ctrl"
