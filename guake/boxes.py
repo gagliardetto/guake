@@ -482,39 +482,44 @@ class TerminalBox(Gtk.Box, TerminalHolder):
                 cr.show_text(clean_line)
         
         # Draw the scrolling viewfinder
-        self.draw_viewfinder(cr)
+        self.draw_viewfinder(cr, width, height)
 
     def get_minimap_row_height(self):
         return 3
 
-    def draw_viewfinder(self, cr):
+    def draw_viewfinder(self, cr, width, height):
         adj = self.terminal.get_vadjustment()
-        page_size = adj.get_page_size()
         page_increment = adj.get_page_increment()
-        upper = adj.get_upper() # the total number of rows in the terminal
-        lower = adj.get_lower() # the number of rows above the top of the terminal
-        value = adj.get_value() # the number of rows above the top of the terminal
-        print("page_size: ", page_size)
-        print("page_increment: ", page_increment)
-        print("upper: ", upper)
-        print("lower: ", lower)
-        print("value: ", value)
+        total_rows = adj.get_upper()  # the total number of rows in the terminal
+        first_visible_row = adj.get_value()  # the number of rows above the top of the terminal
+
         # Calculate the height of the viewfinder
         viewfinder_height = page_increment * self.get_minimap_row_height()
-        print("viewfinder_height: ", viewfinder_height)
-        # Calculate the y coordinate of the viewfinder
-        viewfinder_y = value * self.get_minimap_row_height()
-        print("viewfinder_y: ", viewfinder_y)
 
-        # fix viewfinder_y 
-        if viewfinder_y + viewfinder_height > upper * self.get_minimap_row_height():
-            viewfinder_y = upper * self.get_minimap_row_height() - viewfinder_height
-        print("viewfinder_y: ", viewfinder_y)
+        how_many_rows_fit_in_minimap = height / self.get_minimap_row_height()
+        if total_rows < how_many_rows_fit_in_minimap:
+            how_many_rows_fit_in_minimap = total_rows
 
+        max_visible_row = total_rows - page_increment
+
+        viewfinder_top_y = 0
+        if max_visible_row > 0:
+            # calculate the ratio between max_visible_row and first_visible_row; e.g. 10 rows, 5 rows visible, ratio is 0.5
+            ratio = first_visible_row / max_visible_row
+
+            # now apply that ratio to how_many_rows_fit_in_minimap
+            ratio_2 = ratio * (how_many_rows_fit_in_minimap - page_increment)
+
+            # Calculate the top of the viewfinder
+            viewfinder_top_y = ratio_2 * self.get_minimap_row_height()
+        elif max_visible_row == 0:
+            viewfinder_top_y = first_visible_row * self.get_minimap_row_height()
+        
         # Draw the viewfinder
         cr.set_source_rgba(1, 1, 1, 0.5)
-        cr.rectangle(0, viewfinder_y, self.minimap.get_allocated_width(), viewfinder_height)
+        cr.rectangle(0, viewfinder_top_y, self.minimap.get_allocated_width(), viewfinder_height)
         cr.fill()
+
 
     def on_terminal_content_changed(self, terminal, minimap):
         # Your existing code to get terminal contents
