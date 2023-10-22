@@ -443,8 +443,8 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
     def on_draw_minimap(self, widget, cr):
         # Get dimensions
-        width = widget.get_allocated_width()
-        height = widget.get_allocated_height()
+        m_width = widget.get_allocated_width()
+        m_height = widget.get_allocated_height()
 
         # Set Cairo properties (e.g., font, font size)
         cr.set_source_rgb(0, 1, 0)  # Green text
@@ -452,20 +452,25 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.set_font_size(2)
 
         adj = self.terminal.get_vadjustment()
-        first_visible_row = adj.get_value() # the number of rows above the top of the terminal
         total_rows = adj.get_upper() # the total number of rows in the terminal
-        how_many_rows_fit_in_minimap = height / self.get_minimap_row_height()
-        print("how_many_rows_fit_in_minimap: ", how_many_rows_fit_in_minimap)
-        # determine the starting row to draw
-        starting_row = int(first_visible_row)
-        if total_rows < how_many_rows_fit_in_minimap:
-            starting_row = 0
-        elif starting_row + how_many_rows_fit_in_minimap > total_rows:
-            starting_row = first_visible_row
-            # but if we're at the bottom of the terminal, we want to draw the last few rows
-            if total_rows - starting_row < how_many_rows_fit_in_minimap:
-                starting_row = total_rows - how_many_rows_fit_in_minimap
-        print("starting_row: ", starting_row)
+        t_first_visible_row = adj.get_value() # the number of rows above the top of the terminal
+        m_page = m_height / self.get_minimap_row_height()
+        t_page = adj.get_page_size() # the number of rows visible in the terminal
+        print("m_page: ", m_page)
+        print("t_page: ", t_page)
+
+        t_range_end = total_rows - t_page
+        m_range_end = total_rows - m_page
+
+        # calculate start and stop rows of the minimap
+        m_start = 0
+        m_stop = m_page
+        if t_first_visible_row > 0:
+            ratio = t_first_visible_row / t_range_end
+            m_start = ratio * m_range_end
+            m_stop = m_start + m_page
+
+        starting_row = int(m_start)
         
         if hasattr(self, 'terminal_content'):
             # Here, implement your logic to represent self.terminal_content
@@ -475,8 +480,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             for i, line in enumerate(lines):
                 if i < starting_row:
                     continue
-                if line == '':
-                    continue
+                # if line == '':
+                #     continue
+                if drawn_lines >= m_page:
+                    break
                 y_coordinate = drawn_lines * 3
                 drawn_lines += 1
                 cr.move_to(0, y_coordinate)
@@ -484,7 +491,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
                 cr.show_text(clean_line)
         
         # Draw the scrolling viewfinder
-        self.draw_viewfinder(cr, width, height)
+        self.draw_viewfinder(cr, m_width, m_height)
 
     def get_minimap_row_height(self):
         return 3
