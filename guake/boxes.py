@@ -64,6 +64,7 @@ class TerminalHolder:
 import cairo
 import random
 import string
+from copy import deepcopy
 
 class RootTerminalBox(Gtk.Overlay, TerminalHolder):
     def __init__(self, guake, parent_notebook):
@@ -425,6 +426,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         col_count = term.get_column_count()
         self.minimap = Gtk.DrawingArea()
         self.minimap.set_size_request(col_count*2, 100)  # for example
+        # Connect the scroll event to the handler
+        self.minimap.add_events(Gdk.EventMask.SCROLL_MASK)
+        self.minimap.set_sensitive(True) # make sure the minimap can be scrolled
+        self.minimap.connect("scroll-event", self.on_scroll_minimap)
         self.minimap.show()
 
         container = Gtk.HBox()  # Container to hold both scrollbar and minimap
@@ -440,6 +445,22 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.terminal.handler_ids.append(
             self.terminal.connect("contents-changed", self.on_terminal_content_changed, self.minimap)
         )
+    
+    def on_scroll_minimap(self, widget, event):
+        adj = self.terminal.get_vadjustment()
+        value = adj.get_value()
+        step = adj.get_step_increment()
+
+        if event.direction == Gdk.ScrollDirection.UP:
+            value -= step
+        elif event.direction == Gdk.ScrollDirection.DOWN:
+            value += step
+
+        # Ensure the value falls within the valid range
+        adj.set_value(min(max(value, adj.get_lower()), adj.get_upper() - adj.get_page_size()))
+        
+        return True  # Stop event propagation
+
 
     def on_draw_minimap(self, widget, cr):
         # Get dimensions
@@ -528,7 +549,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.set_source_rgba(1, 1, 1, 0.5)
         cr.rectangle(0, viewfinder_top_y, self.minimap.get_allocated_width(), viewfinder_height)
         cr.fill()
-
 
     def on_terminal_content_changed(self, terminal, minimap):
         # Your existing code to get terminal contents
