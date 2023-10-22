@@ -421,8 +421,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.scroll.show()
 
         # Your minimap setup code here
+        term = self.terminal
+        col_count = term.get_column_count()
         self.minimap = Gtk.DrawingArea()
-        self.minimap.set_size_request(110, 100)  # for example
+        self.minimap.set_size_request(col_count*2, 100)  # for example
         self.minimap.show()
 
         container = Gtk.HBox()  # Container to hold both scrollbar and minimap
