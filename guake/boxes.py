@@ -8,7 +8,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GObject
 from gi.repository import Gdk
 from gi.repository import Gio
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 from gi.repository import Vte
 
 from guake.callbacks import MenuHideCallback
@@ -113,10 +113,10 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         self.search_next_btn.set_image(next_image)
 
         # Pack into box
-        self.search_box.pack_start(self.search_close_btn, False, False, 0)
-        self.search_box.pack_start(self.search_entry, False, False, 0)
         self.search_box.pack_start(self.search_prev_btn, False, False, 0)
         self.search_box.pack_start(self.search_next_btn, False, False, 0)
+        self.search_box.pack_start(self.search_entry, False, False, 0)
+        self.search_box.pack_start(self.search_close_btn, False, False, 0)
 
         # Add into frame
         self.search_frame.add(self.search_box)
@@ -138,7 +138,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         self.search_revealer.add(self.search_frame)
         self.search_revealer.set_transition_duration(500)
         self.search_revealer.set_transition_type(Gtk.RevealerTransitionType.CROSSFADE)
-        self.search_revealer.set_valign(Gtk.Align.END)
+        self.search_revealer.set_valign(Gtk.Align.START)
         self.search_revealer.set_halign(Gtk.Align.END)
 
         # Welcome to the overlay
@@ -164,7 +164,6 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         self.search_revealer_show_cb_id = self.search_revealer.connect(
             "show", search_revealer_show_cb
         )
-        self.search_frame.connect("unmap", lambda x: self.search_revealer.hide())
 
     def get_terminals(self):
         return self.get_child().get_terminals()
@@ -308,7 +307,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         )
 
     def show_search_box(self):
-        if not self.search_revealer.get_reveal_child():
+        if not self.is_search_box_visible():
             GObject.signal_handler_block(self.search_revealer, self.search_revealer_show_cb_id)
             self.search_revealer.set_visible(True)
             self.search_revealer.set_reveal_child(True)
@@ -319,11 +318,45 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
             self.search_entry.realize()
             self.search_entry.grab_focus()
 
+            self.search_entry.select_region(0, -1)
+            self.search_entry.set_position(-1)
+            self.search_entry.set_text(self.searchstring or "")
+            self.search_entry.set_icon_from_icon_name(
+                Gtk.EntryIconPosition.PRIMARY, "edit-find-symbolic"
+            )
+            self.search_entry.set_icon_from_icon_name(
+                Gtk.EntryIconPosition.SECONDARY, "edit-clear-symbolic"
+            )
+            self.search_entry.set_icon_activatable(
+                Gtk.EntryIconPosition.SECONDARY, True
+            )
+            self.search_entry.set_icon_sensitive(
+                Gtk.EntryIconPosition.SECONDARY, True
+            )
+            self.search_entry.set_icon_tooltip_text(
+                Gtk.EntryIconPosition.SECONDARY, "Clear search"
+            )
+            self.search_entry.set_icon_tooltip_text(
+                Gtk.EntryIconPosition.PRIMARY, "Search"
+            )
+
     def hide_search_box(self):
-        if self.search_revealer.get_reveal_child():
+        if self.is_search_box_visible():
             self.search_revealer.set_reveal_child(False)
             self.last_terminal_focused.grab_focus()
             self.last_terminal_focused.unselect_all()
+            # if the last search wasn't a valid regex, clear the search box
+            if self.searchstring != "" and self.searchre is None:
+                self.searchstring = ""
+                self.search_entry.set_text("")
+                self.search_entry.set_icon_from_icon_name(
+                    Gtk.EntryIconPosition.PRIMARY, "edit-find-symbolic"
+                )
+                self.search_entry.get_style_context().remove_class("error")
+    def is_search_box_visible(self):
+        # NOTE: the the revelaer might not be visible, but the child is revealed
+        #       so we need to check both
+        return self.search_revealer.get_child_revealed() or self.search_revealer.get_reveal_child()
 
     def close_search_box(self, event):
         self.hide_search_box()
@@ -374,9 +407,24 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
 
             # Set search regex on term
             self.searchstring = text
-            self.searchre = Vte.Regex.new_for_search(
-                text, -1, Vte.REGEX_FLAGS_DEFAULT | PCRE2_MULTILINE
-            )
+            
+            # try to compile the regex; if fail, highlight the search entry in red
+            try:
+                self.searchre = Vte.Regex.new_for_search(
+                    text, -1, Vte.REGEX_FLAGS_DEFAULT | PCRE2_MULTILINE
+                )
+                self.search_entry.get_style_context().remove_class("error")
+                # change search icon to search icon
+                self.search_entry.set_icon_from_icon_name(
+                    Gtk.EntryIconPosition.PRIMARY, "edit-find-symbolic"
+                )
+            except GLib.Error:
+                self.searchre = None
+                self.search_entry.get_style_context().add_class("error")
+                # change search icon to error icon
+                self.search_entry.set_icon_from_icon_name(
+                    Gtk.EntryIconPosition.PRIMARY, "dialog-error-symbolic"
+                )
             term.search_set_regex(self.searchre, 0)
         self.do_search(None)
 
