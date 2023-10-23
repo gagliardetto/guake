@@ -424,8 +424,9 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         # Your minimap setup code here
         term = self.terminal
         col_count = term.get_column_count()
+        print("col_count: ", col_count)
         self.minimap = Gtk.DrawingArea()
-        self.minimap.set_size_request(col_count*2, 100)  # for example
+        self.minimap.set_size_request(col_count*(self.get_minimap_row_height() - 1), 100)  # for example
         # Connect the scroll event to the handler
         self.minimap.add_events(Gdk.EventMask.SCROLL_MASK)
         self.minimap.set_sensitive(True) # make sure the minimap can be scrolled
@@ -470,7 +471,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         # Set Cairo properties (e.g., font, font size)
         cr.set_source_rgb(0, 1, 0)  # Green text
         cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(2)
+        cr.set_font_size(self.get_minimap_row_height() - 1)
 
         adj = self.terminal.get_vadjustment()
         total_rows = adj.get_upper() # the total number of rows in the terminal
@@ -505,7 +506,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
                 #     continue
                 if drawn_lines >= m_page:
                     break
-                y_coordinate = drawn_lines * 3
+                y_coordinate = drawn_lines * self.get_minimap_row_height()
                 drawn_lines += 1
                 cr.move_to(0, y_coordinate)
                 clean_line = line.replace('\x00', '')
@@ -515,7 +516,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.draw_viewfinder(cr, m_width, m_height)
 
     def get_minimap_row_height(self):
-        return 3
+        return 2
 
     def draw_viewfinder(self, cr, width, height):
         adj = self.terminal.get_vadjustment()
