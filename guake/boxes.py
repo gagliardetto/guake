@@ -424,7 +424,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         # Your minimap setup code here
         term = self.terminal
         col_count = term.get_column_count()
-        print("col_count: ", col_count)
         self.minimap = Gtk.DrawingArea()
         self.minimap.set_size_request(col_count*(self.get_minimap_row_height() - 1), 100)  # for example
         # Connect the scroll event to the handler
@@ -478,8 +477,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         t_first_visible_row = adj.get_value() # the number of rows above the top of the terminal
         m_page = m_height / self.get_minimap_row_height()
         t_page = adj.get_page_size() # the number of rows visible in the terminal
-        print("m_page: ", m_page)
-        print("t_page: ", t_page)
 
         t_range_end = total_rows - t_page
         m_range_end = total_rows - m_page
