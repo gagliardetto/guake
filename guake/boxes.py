@@ -316,7 +316,6 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
             # (guake:22694): Gtk-CRITICAL **: 18:04:57.345:
             # gtk_widget_event: assertion 'WIDGET_REALIZED_FOR_EVENT (widget, event)' failed
             self.search_entry.realize()
-            self.search_entry.grab_focus()
 
             self.search_entry.select_region(0, -1)
             self.search_entry.set_position(-1)
@@ -339,6 +338,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
             self.search_entry.set_icon_tooltip_text(
                 Gtk.EntryIconPosition.PRIMARY, "Search"
             )
+            self.search_entry.grab_focus()
 
     def hide_search_box(self):
         if self.is_search_box_visible():
@@ -346,13 +346,13 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
             self.last_terminal_focused.grab_focus()
             self.last_terminal_focused.unselect_all()
             # if the last search wasn't a valid regex, clear the search box
-            if self.searchstring != "" and self.searchre is None:
-                self.searchstring = ""
-                self.search_entry.set_text("")
-                self.search_entry.set_icon_from_icon_name(
-                    Gtk.EntryIconPosition.PRIMARY, "edit-find-symbolic"
-                )
-                self.search_entry.get_style_context().remove_class("error")
+            # if self.searchstring != "" and self.searchre is None:
+            #     self.searchstring = ""
+            #     self.search_entry.set_text("")
+            #     self.search_entry.set_icon_from_icon_name(
+            #         Gtk.EntryIconPosition.PRIMARY, "edit-find-symbolic"
+            #     )
+            #     self.search_entry.get_style_context().remove_class("error")
     def is_search_box_visible(self):
         # NOTE: the the revelaer might not be visible, but the child is revealed
         #       so we need to check both
