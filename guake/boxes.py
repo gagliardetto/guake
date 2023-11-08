@@ -538,11 +538,25 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             m_stop = m_start + m_page
 
         starting_row = int(m_start)
+
+        # get terminal width (how many columns are visible, in characters)
+        t_width = self.terminal.get_column_count()
         
         if hasattr(self, 'terminal_content'):
             # Here, implement your logic to represent self.terminal_content
             # For example, you might simply draw the first few lines
             lines = self.terminal_content.split('\n')
+            # now check if each line also needs to be split because it's too long
+            final_lines = []
+            for line in lines:
+                if len(line) > t_width:
+                    # split the line
+                    line = [line[i:i+t_width] for i in range(0, len(line), t_width)]
+                    final_lines.extend(line)
+                else:
+                    final_lines.append(line)
+            lines = final_lines
+            
             drawn_lines = 0
             for i, line in enumerate(lines):
                 if i < starting_row:
