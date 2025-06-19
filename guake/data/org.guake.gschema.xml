@@ -576,6 +576,11 @@
             <summary>Quick tab navigation.</summary>
             <description>Shows a dialog to navigate between tabs.</description>
         </key>
+        <key name="world-map-navigation" type="s">
+            <default>'&lt;Control&gt;&lt;Shift&gt;k'</default>
+            <summary>World Map navigation.</summary>
+            <description>Shows the world map to navigate between projects and tabs.</description>
+        </key>
         <key name="zoom-in" type="s">
             <default>'&lt;Control&gt;plus'</default>
             <summary>Zoom in.</summary>

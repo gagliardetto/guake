@@ -72,6 +72,7 @@ from guake.simplegladeapp import SimpleGladeApp
 from guake.theme import patch_gtk_theme
 from guake.theme import select_gtk_theme
 from guake.utils import BackgroundImageManager
+from guake.world_map import WorldMapView 
 from guake.utils import FileManager
 from guake.utils import FullscreenManager
 from guake.utils import HidePrevention
@@ -191,6 +192,10 @@ class Guake(SimpleGladeApp):
         self.window.set_keep_above(True)
         self.mainframe = self.get_widget("mainframe")
         self.mainframe.remove(self.get_widget("notebook-teminals"))
+
+        # World Map View Initialization
+        self.world_map_view = WorldMapView(self)
+        self.world_map_visible = False
 
         # Pending restore for terminal split after show-up
         #     [(RootTerminalBox, TerminaBox, panes), ...]
@@ -1089,7 +1094,6 @@ class Guake(SimpleGladeApp):
         dialog.destroy()
         HidePrevention(self.window).allow()
         return True
-
     def accel_copy_clipboard(self, *args):
         # TODO KEYBINDINGS ONLY
         """Callback to copy text in the shown terminal. Called by the
@@ -1574,3 +1578,29 @@ class Guake(SimpleGladeApp):
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)
+    def accel_world_map_navigation(self, *args):
+        """Toggles the world map terminal organization view."""
+        log.debug("Toggling World Map View.")
+        current_notebook = self.notebook_manager.get_current_notebook()
+
+        if self.world_map_visible:
+            # --- Hide Map and Show Terminals ---
+            # The map is currently visible, so we switch back to the notebook.
+            self.mainframe.remove(self.world_map_view)
+            self.mainframe.pack_start(current_notebook, True, True, 0)
+            current_notebook.show()
+            self.world_map_visible = False
+            self.set_terminal_focus()  # Return focus to the active terminal
+        else:
+            # --- Hide Terminals and Show Map ---
+            # The notebook is visible, so we switch to the map.
+            # First, ensure the map is up-to-date with current terminals.
+            self.world_map_view.populate_map()
+
+            self.mainframe.remove(current_notebook)
+            self.mainframe.pack_start(self.world_map_view, True, True, 0)
+            self.world_map_view.show()
+            self.world_map_visible = True
+            self.world_map_view.grab_focus()
+
+        return True

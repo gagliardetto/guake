@@ -71,6 +71,7 @@ class Keybindings:
             ("close-tab", x),
             ("rename-current-tab", self.guake.accel_rename_current_tab),
             ("quick-tab-navigation", self.guake.accel_quick_tab_navigation),
+            ("world-map-navigation", self.guake.accel_world_map_navigation),
             ("previous-tab", self.guake.accel_prev),
             ("previous-tab-alt", self.guake.accel_prev),
             ("next-tab", self.guake.accel_next),
