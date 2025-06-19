@@ -201,7 +201,7 @@ class WorldMapView(Gtk.ScrolledWindow):
 
         for project in visible_projects:
             project_frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN)
-            self.main_box.pack_start(project_frame, False, False, 0)
+            self.main_box.pack_start(project_frame, True, True, 0)
             
             frame_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
             project_frame.add(frame_vbox)
@@ -230,24 +230,26 @@ class WorldMapView(Gtk.ScrolledWindow):
             frame_header.pack_end(add_terminal_button, False, False, 0)
             
             menu_button = Gtk.MenuButton()
-            popover = Gtk.Popover()
-            menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            popover = Gtk.Popover.new(menu_button)
+            menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5, margin=5)
             popover.add(menu_box)
             menu_button.set_popover(popover)
             
             rename_button = Gtk.ModelButton(label="Rename")
             rename_button.connect("clicked", self.on_rename_project_clicked, project)
-            menu_box.pack_start(rename_button, True, True, 0)
+            menu_box.pack_start(rename_button, False, False, 0)
 
             delete_button = Gtk.ModelButton(label="Delete Project")
             delete_button.connect("clicked", self.on_delete_project_clicked, project)
-            menu_box.pack_start(delete_button, True, True, 0)
+            menu_box.pack_start(delete_button, False, False, 0)
+            menu_box.show_all()
             frame_header.pack_end(menu_button, False, False, 0)
 
-            if is_expanded:
-                content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-                frame_vbox.pack_start(content_box, True, True, 0)
+            content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            content_box.set_visible(is_expanded)
+            frame_vbox.pack_start(content_box, True, True, 0)
 
+            if is_expanded:
                 tags_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
                 content_box.pack_start(tags_box, False, False, 0)
                 
