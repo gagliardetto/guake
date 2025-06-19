@@ -43,6 +43,11 @@ class WorldMapView(Gtk.ScrolledWindow):
             .world-map-view { background-color: @theme_base_color; }
             .drop-highlight { background-color: @theme_selected_bg_color; }
             .empty-project-grid { min-height: 80px; }
+            .tag-button {
+                padding: 2px 6px;
+                border-radius: 12px;
+                font-size: small;
+            }
         """)
         self.get_style_context().add_class("world-map-view")
         Gtk.StyleContext.add_provider_for_screen(
@@ -207,11 +212,18 @@ class WorldMapView(Gtk.ScrolledWindow):
 
         for project in visible_projects:
             project_frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN)
+            self.main_box.pack_start(project_frame, False, False, 0)
+            
+            # Main container for the frame content (title, tags, grid)
+            frame_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
+            project_frame.add(frame_vbox)
 
+            # --- Header: Title + Menu ---
             frame_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            frame_vbox.pack_start(frame_header, False, False, 0)
             
             event_box = Gtk.EventBox()
-            label = Gtk.Label(label=project["title"])
+            label = Gtk.Label(label=project["title"], xalign=0)
             event_box.add(label)
             event_box.connect("button-press-event", self.on_project_label_clicked, project)
             frame_header.pack_start(event_box, True, True, 0)
@@ -221,20 +233,34 @@ class WorldMapView(Gtk.ScrolledWindow):
             menu_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             popover.add(menu_box)
             menu_button.set_popover(popover)
-
+            
             rename_button = Gtk.ModelButton(label="Rename")
             rename_button.connect("clicked", self.on_rename_project_clicked, project)
             menu_box.pack_start(rename_button, True, True, 0)
             frame_header.pack_end(menu_button, False, False, 0)
-            project_frame.set_label_widget(frame_header)
-            
-            self.main_box.pack_start(project_frame, False, False, 0)
 
-            grid = Gtk.Grid(column_spacing=15, row_spacing=15, margin=15)
+            # --- Tags Section ---
+            tags_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            frame_vbox.pack_start(tags_box, False, False, 0)
+            
+            # Display existing tags
+            for key, value in project.get("tags", {}).items():
+                tag_widget = self._create_tag_widget(project, key, value)
+                tags_box.pack_start(tag_widget, False, False, 0)
+
+            # "Add Tag" button
+            add_tag_button = Gtk.Button.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
+            add_tag_button.set_relief(Gtk.ReliefStyle.NONE)
+            add_tag_button.connect("clicked", self.on_add_tag_clicked, project)
+            tags_box.pack_start(add_tag_button, False, False, 0)
+
+
+            # --- Terminals Grid ---
+            grid = Gtk.Grid(column_spacing=15, row_spacing=15, margin_top=10)
             if not project["terminals"]:
                 grid.get_style_context().add_class("empty-project-grid")
 
-            project_frame.add(grid)
+            frame_vbox.pack_start(grid, True, True, 0)
             
             grid.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
             grid.connect("drag-data-received", self.on_grid_drop, project)
@@ -249,6 +275,17 @@ class WorldMapView(Gtk.ScrolledWindow):
 
         self.show_all()
 
+    def _create_tag_widget(self, project, key, value):
+        """Creates a clickable widget for a single tag."""
+        tag_button = Gtk.Button(label=f"#{key}:{value}")
+        tag_button.get_style_context().add_class("tag-button")
+        tag_button.connect("clicked", self.on_tag_clicked, project, key)
+        
+        # Add right-click handler for deleting
+        tag_button.connect("button-press-event", self.on_tag_right_click, project, key)
+
+        return tag_button
+
     def _create_terminal_preview(self, terminal, page_num):
         notebook = self.guake_app.get_notebook()
         title = notebook.get_tab_label_text(notebook.get_nth_page(page_num)) or f"Terminal {page_num + 1}"
@@ -256,12 +293,7 @@ class WorldMapView(Gtk.ScrolledWindow):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
         button.add(box)
         
-        # Use 'clicked' for the primary (left-click) action.
-        # This signal is only emitted after a press AND release, and is
-        # ignored if a drag operation is started.
         button.connect("clicked", self.on_preview_clicked, terminal, page_num)
-        
-        # Use 'button-press-event' ONLY for the secondary (right-click) action.
         button.connect("button-press-event", self.on_preview_right_click, terminal)
         
         DND_TARGET = [Gtk.TargetEntry.new('text/plain', Gtk.TargetFlags.SAME_APP, 0)]
@@ -309,6 +341,54 @@ class WorldMapView(Gtk.ScrolledWindow):
         if response == Gtk.ResponseType.OK and text:
             return text
         return None
+        
+    def on_add_tag_clicked(self, widget, project):
+        """Handles click on the 'add tag' button."""
+        tag_string = self._show_text_input_dialog(
+            f"Add Tag to {project['title']}",
+            "Enter tag as 'key:value':"
+        )
+        if tag_string and ':' in tag_string:
+            key, value = tag_string.split(':', 1)
+            project.setdefault("tags", {})[key.strip()] = value.strip()
+            self._save_layout()
+            self.populate_map()
+
+    def on_tag_clicked(self, widget, project, key):
+        """Handles left-click on an existing tag to modify it."""
+        current_value = project["tags"][key]
+        tag_string = self._show_text_input_dialog(
+            f"Edit Tag in {project['title']}",
+            "Edit tag 'key:value':",
+            f"{key}:{current_value}"
+        )
+        if tag_string and ':' in tag_string:
+            new_key, new_value = tag_string.split(':', 1)
+            # Remove old key and add new one to handle key renames
+            del project["tags"][key]
+            project["tags"][new_key.strip()] = new_value.strip()
+            self._save_layout()
+            self.populate_map()
+
+    def on_tag_right_click(self, widget, event, project, key):
+        """Handles right-click on a tag to delete it."""
+        if event.button == 3:
+            dialog = Gtk.MessageDialog(
+                transient_for=self.guake_app.window,
+                flags=0,
+                message_type=Gtk.MessageType.QUESTION,
+                buttons=Gtk.ButtonsType.YES_NO,
+                text=f"Delete tag '#{key}'?",
+            )
+            dialog.format_secondary_text(f"Are you sure you want to remove this tag from the '{project['title']}' project?")
+            response = dialog.run()
+            if response == Gtk.ResponseType.YES:
+                del project["tags"][key]
+                self._save_layout()
+                self.populate_map()
+            dialog.destroy()
+            return True
+        return False
 
     def on_project_label_clicked(self, widget, event, project):
         """Handles clicks on the project title label."""
