@@ -48,6 +48,10 @@ class WorldMapView(Gtk.ScrolledWindow):
                 border-radius: 12px;
                 font-size: small;
             }
+            .project-frame-collapsed {
+                background-color: alpha(@theme_bg_color, 0.5);
+                border-radius: 4px;
+            }
         """)
         self.get_style_context().add_class("world-map-view")
         Gtk.StyleContext.add_provider_for_screen(
@@ -146,33 +150,37 @@ class WorldMapView(Gtk.ScrolledWindow):
             return self.layout["projects"]
 
         filtered_projects = []
+        lower_filter = filter_text.lower()
         tag_match = re.search(r'(tag:|#)(\w+)(?::(\S+))?', filter_text)
         
         for project in self.layout["projects"]:
             matched_terminals = []
             
+            project_tags = project.get('tags', {})
+            # Check for matches in project title or tags first
+            project_title_match = lower_filter in project['title'].lower()
+            tag_content_match = any(lower_filter in f"{k}:{v}".lower() for k, v in project_tags.items())
+
             if tag_match:
                 tag_key, tag_value = tag_match.group(2), tag_match.group(3) or '*'
-                project_tags = project.get('tags', {})
                 if tag_key in project_tags and (tag_value == '*' or project_tags[tag_key] == tag_value):
                     matched_terminals = project["terminals"]
-            else:
+            else: # General text search
                 for uuid in project["terminals"]:
                     if uuid in all_terminals_map:
                         terminal, page_num = all_terminals_map[uuid]
                         notebook = self.guake_app.get_notebook()
-                        title = notebook.get_tab_label_text(notebook.get_nth_page(page_num)) or ""
+                        title = (notebook.get_tab_label_text(notebook.get_nth_page(page_num)) or "").lower()
                         try:
-                            cwd = terminal.get_current_directory() or ""
+                            cwd = (terminal.get_current_directory() or "").lower()
                         except Exception:
                             cwd = ""
-                        if (filter_text.lower() in project['title'].lower() or
-                            filter_text.lower() in title.lower() or
-                            filter_text.lower() in cwd.lower()):
+                        if (project_title_match or tag_content_match or
+                            lower_filter in title or lower_filter in cwd):
                             matched_terminals.append(uuid)
-
-            if matched_terminals or (not tag_match and filter_text.lower() in project['title'].lower()):
-                terminals_to_show = project["terminals"] if not tag_match and filter_text.lower() in project['title'].lower() else matched_terminals
+            
+            if matched_terminals or project_title_match or tag_content_match:
+                terminals_to_show = project["terminals"] if project_title_match or tag_content_match and not matched_terminals else matched_terminals
                 filtered_projects.append({**project, "terminals": terminals_to_show})
 
         return filtered_projects
@@ -200,8 +208,12 @@ class WorldMapView(Gtk.ScrolledWindow):
         DND_TARGET = [Gtk.TargetEntry.new('text/plain', Gtk.TargetFlags.SAME_APP, 0)]
 
         for project in visible_projects:
+            is_expanded = project.get("expanded", True)
             project_frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN)
-            self.main_box.pack_start(project_frame, True, True, 0)
+            if not is_expanded:
+                project_frame.get_style_context().add_class("project-frame-collapsed")
+
+            self.main_box.pack_start(project_frame, False, False, 0)
             
             frame_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
             project_frame.add(frame_vbox)
@@ -210,7 +222,6 @@ class WorldMapView(Gtk.ScrolledWindow):
             frame_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             frame_vbox.pack_start(frame_header, False, False, 0)
             
-            is_expanded = project.get("expanded", True)
             arrow_icon = "pan-down-symbolic" if is_expanded else "pan-end-symbolic"
             expander_button = Gtk.Button.new_from_icon_name(arrow_icon, Gtk.IconSize.BUTTON)
             expander_button.set_relief(Gtk.ReliefStyle.NONE)
@@ -245,11 +256,10 @@ class WorldMapView(Gtk.ScrolledWindow):
             menu_box.show_all()
             frame_header.pack_end(menu_button, False, False, 0)
 
-            content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            content_box.set_visible(is_expanded)
-            frame_vbox.pack_start(content_box, True, True, 0)
-
             if is_expanded:
+                content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+                frame_vbox.pack_start(content_box, True, True, 0)
+
                 tags_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
                 content_box.pack_start(tags_box, False, False, 0)
                 
@@ -280,11 +290,14 @@ class WorldMapView(Gtk.ScrolledWindow):
                         row, col = divmod(i, cols)
                         grid.attach(preview, col, row, 1, 1)
             else:
-                # If collapsed, just show an ellipsis
-                ellipsis_label = Gtk.Label(label="...")
-                ellipsis_label.set_halign(Gtk.Align.START)
-                ellipsis_label.set_margin_start(10)
-                frame_vbox.pack_start(ellipsis_label, False, False, 0)
+                # If collapsed, show how many terminals are hidden.
+                num_terminals = len(project.get("terminals", []))
+                if num_terminals > 0:
+                    hidden_label = Gtk.Label(label=f"({num_terminals} terminals hidden)")
+                    hidden_label.set_halign(Gtk.Align.START)
+                    hidden_label.set_margin_start(10)
+                    frame_vbox.pack_start(hidden_label, False, False, 0)
+
 
         self.show_all()
 
@@ -395,7 +408,11 @@ class WorldMapView(Gtk.ScrolledWindow):
     def on_rename_project_clicked(self, widget, project):
         new_title = self._show_text_input_dialog("Rename Project", "Enter the new name:", project["title"])
         if new_title:
-            project["title"] = new_title
+            # Find the actual project in the layout to modify it
+            for p in self.layout['projects']:
+                if p['title'] == project['title']:
+                    p['title'] = new_title
+                    break
             self._save_layout()
             self.populate_map()
 
@@ -416,7 +433,7 @@ class WorldMapView(Gtk.ScrolledWindow):
             uncategorized_project = next((p for p in self.layout['projects'] if p['title'] == 'Uncategorized'), None)
             if uncategorized_project:
                 uncategorized_project['terminals'].extend(project_to_delete['terminals'])
-            self.layout['projects'].remove(project_to_delete)
+            self.layout['projects'][:] = [p for p in self.layout['projects'] if p['title'] != project_to_delete['title']]
             self._save_layout()
             self.populate_map()
 
@@ -446,7 +463,11 @@ class WorldMapView(Gtk.ScrolledWindow):
         
         if new_uuid_set:
             new_uuid = new_uuid_set.pop()
-            project['terminals'].append(new_uuid)
+            # Find the actual project in the layout to modify it
+            for p in self.layout['projects']:
+                if p['title'] == project['title']:
+                    p['terminals'].append(new_uuid)
+                    break
             self._save_layout()
             self.populate_map() # Refresh the view to show the new terminal
             log.debug(f"Added new terminal {new_uuid} to project '{project['title']}'")
