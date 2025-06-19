@@ -255,7 +255,15 @@ class WorldMapView(Gtk.ScrolledWindow):
         button = Gtk.Button()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
         button.add(box)
+        
+        # Use 'clicked' for the primary (left-click) action.
+        # This signal is only emitted after a press AND release, and is
+        # ignored if a drag operation is started.
         button.connect("clicked", self.on_preview_clicked, terminal, page_num)
+        
+        # Use 'button-press-event' ONLY for the secondary (right-click) action.
+        button.connect("button-press-event", self.on_preview_right_click, terminal)
+        
         DND_TARGET = [Gtk.TargetEntry.new('text/plain', Gtk.TargetFlags.SAME_APP, 0)]
         button.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
         button.connect("drag-data-get", self.on_drag_data_get, str(terminal.uuid))
@@ -263,6 +271,7 @@ class WorldMapView(Gtk.ScrolledWindow):
         button.connect("drag-motion", self.on_item_drag_motion)
         button.connect("drag-leave", self.on_item_drag_leave)
         button.connect("drag-data-received", self.on_item_drop, str(terminal.uuid))
+        
         label = Gtk.Label.new(title)
         label.set_ellipsize(True)
         preview_area = Gtk.Frame(shadow_type=Gtk.ShadowType.IN)
@@ -364,10 +373,55 @@ class WorldMapView(Gtk.ScrolledWindow):
             self._move_terminal_in_layout(dragged_uuid, target_project, target_idx)
 
     def on_preview_clicked(self, widget, terminal, page_num):
-        log.debug(f"Terminal preview for page {page_num} clicked. Switching view.")
+        """Handles a left-click on a terminal preview."""
+        log.debug(f"Terminal preview for page {page_num} left-clicked. Switching view.")
         self.guake_app.get_notebook().set_current_page(page_num)
         self.guake_app.accel_world_map_navigation()
         terminal.grab_focus()
+
+    def on_preview_right_click(self, widget, event, terminal):
+        """Handles right-clicks on a terminal preview to show a context menu."""
+        if event.button == 3:
+            log.debug(f"Terminal preview for {terminal.uuid} right-clicked. Showing context menu.")
+            self.show_preview_context_menu(widget, event, terminal)
+            return True # Consume the right-click event
+        return False # Do not consume other events (like left-click)
+
+    def show_preview_context_menu(self, widget, event, terminal):
+        """Creates and displays the context menu for a terminal preview."""
+        menu = Gtk.Menu()
+        
+        # Create the "Send to Project" main menu item
+        send_to_item = Gtk.MenuItem(label="Send to Project")
+        
+        # Create the submenu that will be populated with project names
+        send_to_submenu = Gtk.Menu()
+        send_to_item.set_submenu(send_to_submenu)
+
+        project_titles = self.get_project_titles()
+
+        if not project_titles:
+            send_to_item.set_sensitive(False)
+        else:
+            terminal_uuid = str(terminal.uuid)
+            for title in project_titles:
+                project_item = Gtk.MenuItem(label=title)
+                project_item.connect(
+                    "activate",
+                    self.on_send_to_project_activated,
+                    terminal_uuid, 
+                    title
+                )
+                send_to_submenu.append(project_item)
+        
+        menu.append(send_to_item)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+
+    def on_send_to_project_activated(self, widget, terminal_uuid, project_title):
+        """Callback that moves a terminal to the selected project."""
+        log.debug(f"Sending terminal {terminal_uuid} to project '{project_title}'")
+        self.move_terminal_to_project(terminal_uuid, project_title)
 
     def on_key_press(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:
@@ -375,3 +429,38 @@ class WorldMapView(Gtk.ScrolledWindow):
             self.guake_app.accel_world_map_navigation()
             return True
         return False
+        
+    def get_project_titles(self):
+        """Returns a list of all project titles."""
+        self._load_layout() 
+        return [p['title'] for p in self.layout.get('projects', [])]
+
+    def move_terminal_to_project(self, terminal_uuid, target_project_title):
+        """Moves a given terminal to a new project."""
+        if not terminal_uuid or not target_project_title:
+            return
+
+        self._load_layout()
+
+        source_project_title = ""
+        for project in self.layout.get("projects", []):
+            if terminal_uuid in project.get("terminals", []):
+                source_project_title = project["title"]
+                project["terminals"].remove(terminal_uuid)
+                break
+                
+        if source_project_title == target_project_title:
+            return
+
+        for project in self.layout.get("projects", []):
+            if project["title"] == target_project_title:
+                # Ensure 'terminals' key exists before trying to append
+                if 'terminals' not in project:
+                    project['terminals'] = []
+                project['terminals'].append(terminal_uuid)
+                break
+        
+        self._save_layout()
+        # Repopulate the map to reflect the change visually
+        self.populate_map()
+        log.info(f"Moved terminal {terminal_uuid} to project '{target_project_title}'")
