@@ -16,7 +16,7 @@ import logging
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,10 @@ class WorldMapView(Gtk.ScrolledWindow):
         super().__init__()
         self.guake_app = guake_app
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+
+        # Allow the widget to receive focus and handle key events.
+        self.set_can_focus(True)
+        self.connect("key-press-event", self.on_key_press)
 
         self.grid = Gtk.Grid()
         self.grid.set_column_spacing(15)
@@ -123,18 +127,19 @@ class WorldMapView(Gtk.ScrolledWindow):
         box.pack_start(preview_area, True, True, 0)
 
         button.add(box)
-        button.connect("clicked", self.on_preview_clicked, page_num)
+        button.connect("clicked", self.on_preview_clicked, terminal, page_num)
 
         return button
 
-    def on_preview_clicked(self, widget, page_num):
+    def on_preview_clicked(self, widget, terminal, page_num):
         """
         Handles a click on a terminal preview.
         It switches to the corresponding tab and toggles back to the main view.
         :param widget: The Gtk.Button that was clicked.
+        :param terminal: The specific Vte.Terminal widget to focus.
         :param page_num: The page number to switch to.
         """
-        log.debug(f"Terminal preview for page {page_num} clicked. Switching view.")
+        log.debug(f"Terminal preview for page {page_num} clicked. Switching view and focusing terminal.")
 
         # Switch to the selected tab in the notebook
         self.guake_app.get_notebook().set_current_page(page_num)
@@ -142,3 +147,17 @@ class WorldMapView(Gtk.ScrolledWindow):
         # Re-call the accelerator function to toggle the view back to the notebook
         self.guake_app.accel_world_map_navigation()
 
+        # After the view is switched, Guake's main window is visible.
+        # Now, we can give focus to the specific terminal that was clicked.
+        terminal.grab_focus()
+
+    def on_key_press(self, widget, event):
+        """
+        Handles key press events for the World Map view.
+        Closes the view if the Escape key is pressed.
+        """
+        if event.keyval == Gdk.KEY_Escape:
+            log.debug("Escape key pressed, closing World Map View.")
+            self.guake_app.accel_world_map_navigation()
+            return True # Event handled
+        return False # Event not handled
