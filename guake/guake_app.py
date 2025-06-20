@@ -72,7 +72,7 @@ from guake.simplegladeapp import SimpleGladeApp
 from guake.theme import patch_gtk_theme
 from guake.theme import select_gtk_theme
 from guake.utils import BackgroundImageManager
-from guake.world_map import WorldMapView 
+from guake.world_map import WorldMapView
 from guake.utils import FileManager
 from guake.utils import FullscreenManager
 from guake.utils import HidePrevention
@@ -1429,6 +1429,7 @@ class Guake(SimpleGladeApp):
             "timestamp": int(pytime.time()),
             "workspace": {},
         }
+        log.info("Saving Guake tabs to %s", filename)
 
         for key, nb in self.notebook_manager.get_notebooks().items():
             tabs = []
@@ -1539,7 +1540,15 @@ class Guake(SimpleGladeApp):
                                 if len(tab.get("panes", [])) == 1
                                 else tab.get("directory", None)
                             )
-                            nb.new_page_with_focus(directory, tab["label"], tab["custom_label_set"])
+                            terminal_uuid = None
+                            if len(tab.get("panes", [])) == 1:
+                                terminal_uuid = tab["panes"][0].get("uuid")
+                            nb.new_page_with_focus(
+                                directory,
+                                tab["label"],
+                                tab["custom_label_set"],
+                                terminal_uuid=terminal_uuid,
+                            )
 
                     # Remove original pages in notebook
                     for i in range(current_pages):

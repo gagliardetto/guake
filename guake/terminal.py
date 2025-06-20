@@ -97,7 +97,7 @@ class GuakeTerminal(Vte.Terminal):
 
     """Just a vte.Terminal with some properties already set."""
 
-    def __init__(self, guake):
+    def __init__(self, guake, terminal_uuid=None):
         super().__init__()
         self.guake = guake
         self.configure_terminal()
@@ -110,7 +110,10 @@ class GuakeTerminal(Vte.Terminal):
         self.font_scale_index = 0
         self._pid = None
         self.found_link = None
-        self.uuid = uuid.uuid4()
+        if terminal_uuid:
+            self.uuid = uuid.UUID(terminal_uuid) if isinstance(terminal_uuid, str) else terminal_uuid
+        else:
+            self.uuid = uuid.uuid4()
 
         # Custom colors
         self.custom_bgcolor = None

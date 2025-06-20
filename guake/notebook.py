@@ -36,6 +36,7 @@ from guake.utils import save_tabs_when_changed
 
 import gi
 import os
+import uuid
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Wnck", "3.0")
@@ -363,12 +364,12 @@ class TerminalNotebook(Gtk.Notebook):
     def delete_page_current(self, kill=True, prompt=0):
         self.delete_page(self.get_current_page(), kill, prompt)
 
-    def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False):
+    def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None):
         terminal_box = TerminalBox()
         if empty:
             terminal = None
         else:
-            terminal = self.terminal_spawn(directory, open_tab_cwd)
+            terminal = self.terminal_spawn(directory, open_tab_cwd, terminal_uuid=terminal_uuid)
             terminal_box.set_terminal(terminal)
         root_terminal_box = RootTerminalBox(self.guake, self)
         root_terminal_box.set_child(terminal_box)
@@ -402,8 +403,13 @@ class TerminalNotebook(Gtk.Notebook):
             else:
                 self.set_property("show-tabs", True)
 
-    def terminal_spawn(self, directory=None, open_tab_cwd=False):
+    def terminal_spawn(self, directory=None, open_tab_cwd=False, terminal_uuid=None):
         terminal = GuakeTerminal(self.guake)
+        if terminal_uuid:
+            if isinstance(terminal_uuid, str):
+                terminal.uuid = uuid.UUID(terminal_uuid)
+            else:
+                terminal.uuid = terminal_uuid
         terminal.grab_focus()
         terminal.connect(
             "key-press-event",
@@ -440,9 +446,14 @@ class TerminalNotebook(Gtk.Notebook):
         position=None,
         empty=False,
         open_tab_cwd=False,
+        terminal_uuid=None,
     ):
         box, page_num, terminal = self.new_page(
-            directory, position=position, empty=empty, open_tab_cwd=open_tab_cwd
+            directory,
+            position=position,
+            empty=empty,
+            open_tab_cwd=open_tab_cwd,
+            terminal_uuid=terminal_uuid,
         )
         self.set_current_page(page_num)
         if not label:
