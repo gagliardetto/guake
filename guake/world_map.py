@@ -101,6 +101,16 @@ class WorldMapView(Gtk.ScrolledWindow):
         self.search_entry.set_placeholder_text("Filter by name, CWD, or tag:value...")
         self.search_entry.connect("search-changed", self.on_filter_changed)
         header_bar.pack_start(self.search_entry, True, True, 0)
+
+        status_counter_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        header_bar.pack_end(status_counter_box, False, False, 0)
+
+        self.clean_counter_label = Gtk.Label()
+        self.dirty_counter_label = Gtk.Label()
+        self.untracked_counter_label = Gtk.Label()
+        status_counter_box.pack_start(self.clean_counter_label, False, False, 0)
+        status_counter_box.pack_start(self.dirty_counter_label, False, False, 0)
+        status_counter_box.pack_start(self.untracked_counter_label, False, False, 0)
         
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20, margin=20)
         self.root_box.pack_start(self.main_box, True, True, 0)
@@ -140,6 +150,29 @@ class WorldMapView(Gtk.ScrolledWindow):
              page = notebook.get_nth_page(i)
              for term in page.iter_terminals():
                  all_terminals_map[str(term.uuid)] = (term, i)
+
+        # Update git status counters
+        git_counts = {'clean': 0, 'dirty': 0, 'untracked': 0, 'no-git': 0}
+        for term, _ in all_terminals_map.values():
+            try:
+                cwd = term.get_current_directory()
+                status = self._get_git_status(cwd)
+                if status in git_counts:
+                    git_counts[status] += 1
+            except Exception:
+                git_counts['no-git'] += 1
+        
+        self.clean_counter_label.set_markup(f"<small>🟢 {git_counts['clean']}</small>")
+        self.clean_counter_label.get_style_context().add_class('git-status-clean')
+        self.clean_counter_label.set_tooltip_text(f"{git_counts['clean']} clean repositories")
+
+        self.dirty_counter_label.set_markup(f"<small>🟠 {git_counts['dirty']}</small>")
+        self.dirty_counter_label.get_style_context().add_class('git-status-dirty')
+        self.dirty_counter_label.set_tooltip_text(f"{git_counts['dirty']} repositories with uncommitted changes")
+
+        self.untracked_counter_label.set_markup(f"<small>🟡 {git_counts['untracked']}</small>")
+        self.untracked_counter_label.get_style_context().add_class('git-status-untracked')
+        self.untracked_counter_label.set_tooltip_text(f"{git_counts['untracked']} repositories with untracked files")
 
         self.layout.synchronize(all_terminals_map)
         
@@ -628,6 +661,13 @@ class WorldMapView(Gtk.ScrolledWindow):
             log.debug("Escape key pressed, closing World Map View.")
             self.guake_app.accel_world_map_navigation()
             return True
+        
+        # Check for Ctrl+F
+        if event.keyval == Gdk.KEY_f and (event.state & Gdk.ModifierType.CONTROL_MASK):
+            log.debug("Ctrl+F pressed, focusing search bar.")
+            self.search_entry.grab_focus()
+            return True
+
         return False
         
 
