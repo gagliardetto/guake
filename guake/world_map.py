@@ -17,6 +17,8 @@ import json
 import re
 import gi
 import cairo
+import os
+import subprocess
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk
@@ -66,6 +68,10 @@ class WorldMapView(Gtk.ScrolledWindow):
                 background-color: @theme_hover_bg_color;
                 border-color: @theme_selected_bg_color;
             }
+            .git-status-clean { color: #26A269; } 
+            .git-status-dirty { color: #FF7800; } 
+            .git-status-untracked { color: #F6D32D; } 
+            .git-status-nogit { opacity: 0.4; }
         """)
         self.get_style_context().add_class("world-map-view")
         Gtk.StyleContext.add_provider_for_screen(
@@ -224,8 +230,7 @@ class WorldMapView(Gtk.ScrolledWindow):
                 num_terminals = len(project.get("terminals", []))
                 if num_terminals > 0:
                     hidden_label = Gtk.Label(label=f"({num_terminals} terminals hidden)")
-                    hidden_label.set_halign(Gtk.Align.START)
-                    hidden_label.set_margin_start(10)
+                    hidden_label.set_halign(Gtk.Align.CENTER)
                     frame_vbox.pack_start(hidden_label, False, False, 0)
 
         self.show_all()
@@ -261,6 +266,65 @@ class WorldMapView(Gtk.ScrolledWindow):
         tag_button.connect("button-press-event", self.on_tag_right_click, project, key)
         return tag_button
 
+    def _get_git_status(self, directory):
+        """
+        Checks git status, distinguishing between modified and untracked files.
+        Returns: 'clean', 'dirty', 'untracked', or 'no-git'.
+        """
+        if not directory or not os.path.isdir(directory):
+            return "no-git"
+
+        path = directory
+        try:
+            # Traverse up to find the .git directory
+            while path != os.path.dirname(path):  # Stop at root
+                if os.path.isdir(os.path.join(path, '.git')):
+                    # Found repo root, run command from there
+                    result = subprocess.run(
+                        ['git', 'status', '--porcelain'],
+                        capture_output=True, text=True, check=False, cwd=path
+                    )
+                    if result.returncode != 0:
+                        return "no-git"  # Git command failed
+                    
+                    output = result.stdout.strip()
+                    if not output:
+                        return "clean" # All committed
+
+                    has_modified = False
+                    has_untracked = False
+                    for line in output.splitlines():
+                        if line.startswith('??'):
+                            has_untracked = True
+                        else:
+                            has_modified = True
+                    
+                    if has_modified:
+                        return "dirty"      # Uncommitted changes to tracked files
+                    if has_untracked:
+                        return "untracked"  # New files, never committed
+                    
+                    return "clean" # Should not be reached if output is not empty
+                path = os.path.dirname(path)
+            return "no-git"  # No .git directory found
+        except (FileNotFoundError, Exception) as e:
+            log.warning(f"Could not get git status for {directory}: {e}")
+            return "no-git"
+
+    def _summarize_path(self, path):
+        """Shortens a long path for display."""
+        if not path:
+            return ""
+        home = os.path.expanduser("~")
+        if path.startswith(home):
+            path = "~" + path[len(home):]
+        
+        parts = path.split(os.sep)
+        if len(parts) > 4:
+            path = os.sep.join([parts[0], '...', parts[-2], parts[-1]])
+        
+        return path
+
     def _create_terminal_preview(self, terminal, page_num):
         notebook = self.guake_app.get_notebook()
         terminal_name = notebook.get_tab_text_index(page_num) or "Terminal"
@@ -282,15 +346,54 @@ class WorldMapView(Gtk.ScrolledWindow):
         button.connect("drag-leave", self.on_item_drag_leave)
         button.connect("drag-data-received", self.on_terminal_drop_on_item, str(terminal.uuid))
         
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         label = Gtk.Label.new(title)
         label.set_ellipsize(True)
+        label.set_xalign(0)
+        header_box.pack_start(label, True, True, 0)
         
+        try:
+            cwd = terminal.get_current_directory()
+        except Exception:
+            cwd = None
+
+        # Git Status Icon
+        git_status = self._get_git_status(cwd)
+        if git_status == 'clean':
+            icon_name = "emblem-ok-symbolic"
+            tooltip = "Git: Clean"
+        elif git_status == 'dirty':
+            icon_name = "emblem-synchronizing-symbolic"
+            tooltip = "Git: Uncommitted changes to tracked files"
+        elif git_status == 'untracked':
+            icon_name = "document-new-symbolic"
+            tooltip = "Git: Untracked files"
+        else: # 'no-git'
+            icon_name = "emblem-important-symbolic"
+            tooltip = "Not a Git repository"
+        
+        git_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+        git_icon.set_tooltip_text(tooltip)
+        
+        style_context = git_icon.get_style_context()
+        style_context.add_class(f"git-status-{git_status}")
+
+        header_box.pack_end(git_icon, False, False, 0)
+
         bg_color = self.guake_app.get_bgcolor()
         fg_color = self.guake_app.get_fgcolor()
         preview_area = TerminalMinimap(terminal, bg_color, fg_color)
 
-        box.pack_start(label, False, False, 0)
+        # CWD Path Label
+        path_label = Gtk.Label()
+        summarized_path = self._summarize_path(cwd)
+        path_label.set_markup(f"<small>{summarized_path}</small>")
+        path_label.set_ellipsize(True)
+        path_label.set_xalign(0)
+        
+        box.pack_start(header_box, False, False, 0)
         box.pack_start(preview_area, True, True, 0)
+        box.pack_start(path_label, False, False, 0)
         return button
 
     def _show_text_input_dialog(self, title, message, current_text=""):
