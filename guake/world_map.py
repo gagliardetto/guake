@@ -59,6 +59,9 @@ class WorldMapView(Gtk.ScrolledWindow):
                 background-color: alpha(@theme_bg_color, 0.5);
                 border-radius: 4px;
             }
+            .project-frame-dirty {
+                border: 1px solid #FF7800;
+            }
             .terminal-preview-button {
                 border: 1px solid alpha(@theme_fg_color, 0.2);
                 background-color: @theme_bg_color;
@@ -219,13 +222,46 @@ class WorldMapView(Gtk.ScrolledWindow):
         self.terminal_widgets = {}
         
         filter_text = self.search_entry.get_text()
+        
+        # Handle status filter
+        status_match = re.search(r'status=(\w+)', filter_text)
+        status_filter = None
+        if status_match:
+            status_filter = status_match.group(1).lower()
+            # Remove status filter from the main text to avoid it being searched as a literal string
+            filter_text = re.sub(r'status=\w+\s*', '', filter_text, count=1).strip()
+
         visible_projects = self.layout.filter_projects(filter_text, self._all_terminals_map, self.guake_app.get_notebook())
+
+        # Apply status filter if it was present
+        if status_filter:
+            projects_with_status = []
+            for project in visible_projects:
+                # Filter terminals within the project based on git status
+                terminals_with_status = [
+                    uuid for uuid in project.get("terminals", [])
+                    if self._git_status_cache.get(uuid) == status_filter
+                ]
+                
+                # If there are matching terminals, add the project to the list
+                if terminals_with_status:
+                    project_copy = project.copy()
+                    project_copy["terminals"] = terminals_with_status
+                    projects_with_status.append(project_copy)
+            
+            visible_projects = projects_with_status
 
         DND_TARGET = [Gtk.TargetEntry.new('text/plain', Gtk.TargetFlags.SAME_APP, 0)]
 
         for project in visible_projects:
+            is_project_dirty = any(self._git_status_cache.get(uuid) == 'dirty' for uuid in project.get("terminals", []))
+            
             is_expanded = project.get("expanded", True)
             project_frame = Gtk.Frame(shadow_type=Gtk.ShadowType.ETCHED_IN)
+
+            if is_project_dirty:
+                project_frame.get_style_context().add_class("project-frame-dirty")
+            
             if not is_expanded:
                 project_frame.get_style_context().add_class("project-frame-collapsed")
 
