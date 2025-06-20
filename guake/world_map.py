@@ -107,6 +107,12 @@ class WorldMapView(Gtk.ScrolledWindow):
 
     def populate_map(self):
         """Clears and rebuilds the entire world map view based on the current layout and filters."""
+        # Clear all existing widgets from the main container
+        for child in self.main_box.get_children():
+            self.main_box.remove(child)
+
+        # Clear widget trackers. Recreating widgets every time is simpler and more robust
+        # than trying to manage a cache of potentially destroyed widgets.
         self.project_widgets = {}
         self.terminal_widgets = {}
 
@@ -122,8 +128,6 @@ class WorldMapView(Gtk.ScrolledWindow):
         filter_text = self.search_entry.get_text()
         visible_projects = self.layout.filter_projects(filter_text, all_terminals_map, self.guake_app.get_notebook())
 
-        for child in self.main_box.get_children():
-            self.main_box.remove(child)
 
         DND_TARGET = [Gtk.TargetEntry.new('text/plain', Gtk.TargetFlags.SAME_APP, 0)]
 
@@ -182,8 +186,14 @@ class WorldMapView(Gtk.ScrolledWindow):
             menu_box.show_all()
             frame_header.pack_end(menu_button, False, False, 0)
             
-            grid = Gtk.Grid(column_spacing=15, row_spacing=15, margin_top=10)
-            self.project_widgets[project['title']] = {'frame': project_frame, 'grid': grid}
+            flowbox = Gtk.FlowBox(
+                valign=Gtk.Align.START,
+                selection_mode=Gtk.SelectionMode.NONE,
+                column_spacing=15,
+                row_spacing=15,
+                margin_top=10
+            )
+            self.project_widgets[project['title']] = {'frame': project_frame, 'flowbox': flowbox}
 
             if is_expanded:
                 content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -204,11 +214,11 @@ class WorldMapView(Gtk.ScrolledWindow):
                 tags_box.pack_start(add_tag_button, False, False, 0)
 
                 if not project["terminals"]:
-                    grid.get_style_context().add_class("empty-project-grid")
-                content_box.pack_start(grid, True, True, 0)
+                    flowbox.get_style_context().add_class("empty-project-grid")
+                content_box.pack_start(flowbox, True, True, 0)
                 
-                grid.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
-                grid.connect("drag-data-received", self.on_terminal_drop_on_grid, project)
+                flowbox.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
+                flowbox.connect("drag-data-received", self.on_terminal_drop_on_grid, project)
                 self._redraw_project_grid(project, all_terminals_map)
             else:
                 num_terminals = len(project.get("terminals", []))
@@ -221,29 +231,28 @@ class WorldMapView(Gtk.ScrolledWindow):
         self.show_all()
 
     def _redraw_project_grid(self, project, all_terminals_map):
-        """Redraws only the terminal grid for a specific project. Much faster."""
-        if project['title'] not in self.project_widgets: return
-        grid = self.project_widgets[project['title']]['grid']
+        """Redraws the terminal flowbox for a specific project."""
+        project_title = project['title']
+        if project_title not in self.project_widgets:
+            return
+
+        flowbox = self.project_widgets[project_title]['flowbox']
         
-        # Clear existing previews from this grid
-        for child in grid.get_children():
-            grid.remove(child)
+        # Clear existing previews from the flowbox
+        for child in flowbox.get_children():
+            flowbox.remove(child)
 
-        cols = 4
-        for i, term_uuid in enumerate(project.get("terminals", [])):
+        # Re-create and add a fresh preview widget for each terminal
+        for term_uuid in project.get("terminals", []):
             if term_uuid in all_terminals_map:
-                if term_uuid not in self.terminal_widgets:
-                    terminal, page_num = all_terminals_map[term_uuid]
-                    self.terminal_widgets[term_uuid] = self._create_terminal_preview(terminal, page_num)
-                
-                preview_widget = self.terminal_widgets[term_uuid]
-                # Ensure widget is not parented elsewhere before attaching
-                if preview_widget.get_parent():
-                    preview_widget.get_parent().remove(preview_widget)
-
-                row, col = divmod(i, cols)
-                grid.attach(preview_widget, col, row, 1, 1)
-        grid.show_all()
+                terminal, page_num = all_terminals_map[term_uuid]
+                preview_widget = self._create_terminal_preview(terminal, page_num)
+                # We can still cache the widget for the duration of this one `populate_map` call,
+                # though its utility is now limited. It mainly prevents re-creating a preview
+                # if the same terminal appeared multiple times in the layout (which shouldn't happen).
+                self.terminal_widgets[term_uuid] = preview_widget
+                flowbox.add(preview_widget)
+        flowbox.show_all()
 
     def _create_tag_widget(self, project, key, value):
         tag_button = Gtk.Button(label=f"#{key}:{value}")
@@ -400,18 +409,15 @@ class WorldMapView(Gtk.ScrolledWindow):
         if not dragged_uuid: return
         
         source_project, _ = self.layout.get_project_and_index_by_terminal_uuid(dragged_uuid)
-        if not source_project: return
+        if not source_project:
+            log.warning(f"Could not find source project for terminal {dragged_uuid}")
+            return
+
         self.layout.move_terminal_to_project(dragged_uuid, target_project['title'], target_index)
-        
-        # Optimized Redraw
-        all_terminals_map = {str(term.uuid): (term, self.guake_app.get_notebook().page_num(term.get_parent().get_root_box())) for term in self.guake_app.get_notebook().iter_terminals()}
         log.info(f"Moved terminal {dragged_uuid} from project '{source_project['title']}' to '{target_project['title']}'")
-        if source_project:
-            log.info(f"Redrawing project grid for '{source_project['title']}'")
-            self._redraw_project_grid(source_project, all_terminals_map)
-        if source_project['title'] != target_project['title']:
-            log.info(f"Redrawing project grid for '{target_project['title']}'")
-            self._redraw_project_grid(target_project, all_terminals_map)
+
+        # The "optimized" partial redraw was buggy. A full populate is safer and ensures UI consistency.
+        self.populate_map()
 
     def on_any_drop_on_project_frame(self, widget, context, x, y, selection_data, info, timestamp, target_project):
         """Dispatcher for any drop on a project frame."""
@@ -424,19 +430,21 @@ class WorldMapView(Gtk.ScrolledWindow):
             if dragged_project_title == target_project['title']: return
 
             log.debug(f"Dropped project '{dragged_project_title}' onto project '{target_project['title']}'")
-            self.layout.handle_drop(dragged_project_title, target_project['title'])
+            self.layout.reorder_projects(dragged_project_title, target_project['title'])
             self.populate_map()
 
         elif data.startswith("terminal:"):
             dragged_uuid = data.split(":", 1)[1]
-            log.debug(f"Dropped terminal '{dragged_uuid}' onto project '{target_project['title']}'")
+            log.debug(f"Dropped terminal '{dragged_uuid}' onto project frame '{target_project['title']}'")
             self._move_terminal_in_layout(dragged_uuid, target_project)
 
     def on_terminal_drop_on_grid(self, widget, context, x, y, selection_data, info, timestamp, target_project):
         data = selection_data.get_text()
         if data and data.startswith("terminal:"):
             dragged_uuid = data.split(":", 1)[1]
+            log.debug(f"Dropped terminal '{dragged_uuid}' onto grid for project '{target_project['title']}'")
             self._move_terminal_in_layout(dragged_uuid, target_project)
+            return True
 
     def on_terminal_drop_on_item(self, widget, context, x, y, selection_data, info, timestamp, target_uuid):
         self.on_item_drag_leave(widget, context, timestamp)
@@ -448,8 +456,10 @@ class WorldMapView(Gtk.ScrolledWindow):
 
         target_project, target_idx = self.layout.get_project_and_index_by_terminal_uuid(target_uuid)
         if not target_project: return
-        if target_project:
-            self._move_terminal_in_layout(dragged_uuid, target_project, target_idx)
+        
+        log.debug(f"Dropped terminal '{dragged_uuid}' onto terminal '{target_uuid}'")
+        self._move_terminal_in_layout(dragged_uuid, target_project, target_idx)
+        return True
 
     def on_preview_clicked(self, widget, terminal, page_num):
         log.debug(f"Terminal preview for page {page_num} left-clicked. Switching view.")
@@ -479,8 +489,9 @@ class WorldMapView(Gtk.ScrolledWindow):
                 project_item.connect("activate", self.on_send_to_project_activated, terminal_uuid, title)
                 send_to_submenu.append(project_item)
         menu.append(send_to_item)
+        menu.attach_to_widget(widget, None)
         menu.show_all()
-        menu.popup_at_pointer(event)
+        menu.popup_at_widget(widget, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, event)
 
     def on_send_to_project_activated(self, widget, terminal_uuid, project_title):
         log.debug(f"Sending terminal {terminal_uuid} to project '{project_title}'")
@@ -497,7 +508,6 @@ class WorldMapView(Gtk.ScrolledWindow):
 
     def move_terminal_to_project(self, terminal_uuid, target_project_title):
         if not terminal_uuid or not target_project_title: return
-        self._load_layout()
         
         target_project = self.layout.get_project_by_title(target_project_title)
         if not target_project: return
