@@ -21,6 +21,7 @@ import cairo
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk
 from guake.world_map_widgets import TerminalMinimap
+from guake.world_map_layout import LayoutManager
 
 log = logging.getLogger(__name__)
 
@@ -71,8 +72,7 @@ class WorldMapView(Gtk.ScrolledWindow):
             Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        self.layout_file = self.guake_app.get_xdg_config_directory() / "world_map.json"
-        self._load_layout()
+        self.layout = LayoutManager( self.guake_app.get_xdg_config_directory())
 
         self.set_can_focus(True)
         self.connect("key-press-event", self.on_key_press)
@@ -101,105 +101,6 @@ class WorldMapView(Gtk.ScrolledWindow):
 
         log.info("WorldMapView initialized")
 
-    def _load_layout(self):
-        """Loads the project and terminal layout from a JSON file."""
-        load_success = False
-        if self.layout_file.exists():
-            try:
-                with open(self.layout_file, "r", encoding="utf-8") as f:
-                    self.layout = json.load(f)
-                
-                if "divisions" in self.layout and "projects" not in self.layout:
-                    self.layout["projects"] = self.layout.pop("divisions")
-                    log.info("Migrated layout from 'divisions' to 'projects'.")
-
-                if "projects" in self.layout and isinstance(self.layout["projects"], list):
-                    for p in self.layout.get("projects", []):
-                        p.setdefault("tags", {})
-                        p.setdefault("terminals", [])
-                        p.setdefault("expanded", True) 
-                    log.info("World Map layout loaded from %s", self.layout_file)
-                    load_success = True
-                else:
-                    log.warning("Layout file %s is malformed. Resetting to default.", self.layout_file)
-
-            except (json.JSONDecodeError, IOError) as e:
-                log.error("Failed to load or parse world map layout: %s. Resetting to default.", e)
-        
-        if not load_success:
-            self.layout = {"projects": [{"title": "Uncategorized", "terminals": [], "tags": {}, "expanded": True}]}
-
-    def _save_layout(self):
-        """Saves the current layout to a JSON file."""
-        try:
-            with open(self.layout_file, "w", encoding="utf-8") as f:
-                json.dump(self.layout, f, indent=4)
-            log.debug("World Map layout saved.")
-        except IOError as e:
-            log.error("Failed to save world map layout: %s", e)
-
-    def _synchronize_layout(self, current_terminals_map):
-        """Ensures the layout is consistent with currently open terminals."""
-        current_terminal_uuids = set(current_terminals_map.keys())
-        all_layout_uuids = set()
-        uncategorized_project = None
-
-        for project in self.layout["projects"]:
-            if project["title"] == "Uncategorized":
-                uncategorized_project = project
-            
-            project["terminals"] = [uuid for uuid in project["terminals"] if uuid in current_terminal_uuids]
-            all_layout_uuids.update(project["terminals"])
-
-        if uncategorized_project is None:
-            uncategorized_project = {"title": "Uncategorized", "terminals": [], "tags": {}, "expanded": True}
-            self.layout["projects"].append(uncategorized_project)
-
-        new_uuids = current_terminal_uuids - all_layout_uuids
-        if new_uuids:
-            uncategorized_project["terminals"].extend(list(new_uuids))
-            self._save_layout()
-            log.debug("Added new terminals to Uncategorized: %s", new_uuids)
-
-    def _filter_projects(self, filter_text, all_terminals_map):
-        """Filters projects and their terminals based on search query."""
-        if not filter_text:
-            return self.layout["projects"]
-
-        filtered_projects = []
-        lower_filter = filter_text.lower()
-        tag_match = re.search(r'(tag:|#)(\w+)(?::(\S+))?', filter_text)
-        
-        for project in self.layout["projects"]:
-            matched_terminals = []
-            
-            project_tags = project.get('tags', {})
-            project_title_match = lower_filter in project['title'].lower()
-            tag_content_match = any(lower_filter in f"{k}:{v}".lower() for k, v in project_tags.items())
-
-            if tag_match:
-                tag_key, tag_value = tag_match.group(2), tag_match.group(3) or '*'
-                if tag_key in project_tags and (tag_value == '*' or project_tags[tag_key] == tag_value):
-                    matched_terminals = project["terminals"]
-            else:
-                for uuid in project["terminals"]:
-                    if uuid in all_terminals_map:
-                        terminal, page_num = all_terminals_map[uuid]
-                        notebook = self.guake_app.get_notebook()
-                        title = (notebook.get_tab_label_text(notebook.get_nth_page(page_num)) or "").lower()
-                        try:
-                            cwd = (terminal.get_current_directory() or "").lower()
-                        except Exception:
-                            cwd = ""
-                        if (project_title_match or tag_content_match or
-                            lower_filter in title or lower_filter in cwd):
-                            matched_terminals.append(uuid)
-            
-            if matched_terminals or project_title_match or tag_content_match:
-                terminals_to_show = project["terminals"] if project_title_match or tag_content_match and not matched_terminals else matched_terminals
-                filtered_projects.append({**project, "terminals": terminals_to_show})
-
-        return filtered_projects
 
     def on_filter_changed(self, search_entry):
         self.populate_map()
@@ -216,10 +117,10 @@ class WorldMapView(Gtk.ScrolledWindow):
              for term in page.iter_terminals():
                  all_terminals_map[str(term.uuid)] = (term, i)
 
-        self._synchronize_layout(all_terminals_map)
+        self.layout.synchronize(all_terminals_map)
         
         filter_text = self.search_entry.get_text()
-        visible_projects = self._filter_projects(filter_text, all_terminals_map)
+        visible_projects = self.layout.filter_projects(filter_text, all_terminals_map, self.guake_app.get_notebook())
 
         for child in self.main_box.get_children():
             self.main_box.remove(child)
@@ -407,7 +308,7 @@ class WorldMapView(Gtk.ScrolledWindow):
         if tag_string and ':' in tag_string:
             key, value = tag_string.split(':', 1)
             project.setdefault("tags", {})[key.strip()] = value.strip()
-            self._save_layout()
+            self.layout.save()
             self.populate_map()
 
     def on_tag_clicked(self, widget, project, key):
@@ -417,7 +318,7 @@ class WorldMapView(Gtk.ScrolledWindow):
             new_key, new_value = tag_string.split(':', 1)
             del project["tags"][key]
             project["tags"][new_key.strip()] = new_value.strip()
-            self._save_layout()
+            self.layout.save()
             self.populate_map()
 
     def on_tag_right_click(self, widget, event, project, key):
@@ -428,7 +329,7 @@ class WorldMapView(Gtk.ScrolledWindow):
             response = dialog.run()
             if response == Gtk.ResponseType.YES:
                 del project["tags"][key]
-                self._save_layout()
+                self.layout.save()
                 self.populate_map()
             dialog.destroy()
             return True
@@ -443,19 +344,13 @@ class WorldMapView(Gtk.ScrolledWindow):
     def on_new_project_clicked(self, widget):
         new_title = self._show_text_input_dialog("Create New Project", "Enter the name for the new project:")
         if new_title:
-            self.layout["projects"].append({"title": new_title, "terminals": [], "tags": {}, "expanded": True})
-            self._save_layout()
+            self.layout.add_project(new_title)
             self.populate_map()
 
     def on_rename_project_clicked(self, widget, project):
         new_title = self._show_text_input_dialog("Rename Project", "Enter the new name:", project["title"])
         if new_title:
-            # Find the actual project in the layout to modify it
-            for p in self.layout['projects']:
-                if p['title'] == project['title']:
-                    p['title'] = new_title
-                    break
-            self._save_layout()
+            self.layout.rename_project(project["title"], new_title)
             self.populate_map()
 
     def on_delete_project_clicked(self, widget, project_to_delete):
@@ -472,43 +367,20 @@ class WorldMapView(Gtk.ScrolledWindow):
         response = dialog.run()
         dialog.destroy()
         if response == Gtk.ResponseType.YES:
-            uncategorized_project = next((p for p in self.layout['projects'] if p['title'] == 'Uncategorized'), None)
-            if uncategorized_project:
-                uncategorized_project['terminals'].extend(project_to_delete['terminals'])
-            self.layout['projects'][:] = [p for p in self.layout['projects'] if p['title'] != project_to_delete['title']]
-            self._save_layout()
+            self.layout.delete_project(project_to_delete['title'])
+            log.info(f"Deleted project '{project_to_delete['title']}'")
             self.populate_map()
 
     def on_toggle_expand_clicked(self, widget, project_title):
         """Toggles the expanded state of a project."""
-        project_to_toggle = next((p for p in self.layout['projects'] if p['title'] == project_title), None)
-        if project_to_toggle:
-            project_to_toggle['expanded'] = not project_to_toggle.get('expanded', True)
-            self._save_layout()
-            self.populate_map()
-        else:
-            log.warning(f"Could not find project '{project_title}' to toggle expansion.")
+        self.layout.toggle_project_expansion(project_title)
+        self.populate_map()
 
     def on_add_terminal_clicked(self, widget, project):
         """Adds a new terminal and assigns it to the specified project."""
-        notebook = self.guake_app.get_notebook()
-        
-        uuid_before = {str(term.uuid) for term in notebook.iter_terminals()}
-        self.guake_app.add_tab()
-        uuid_after = {str(term.uuid) for term in notebook.iter_terminals()}
-        new_uuid_set = uuid_after - uuid_before
-        
-        if new_uuid_set:
-            new_uuid = new_uuid_set.pop()
-            for p in self.layout['projects']:
-                if p['title'] == project['title']:
-                    p['terminals'].append(new_uuid)
-                    break
-            self._save_layout()
-            self.populate_map() 
-            log.debug(f"Added new terminal {new_uuid} to project '{project['title']}'")
-        else:
-            log.warning("Could not identify new terminal after creation.")
+        self.layout.add_new_terminal_to_project(project['title'], self.guake_app)
+        self.populate_map()
+        log.info(f"Added new terminal to project '{project['title']}'")
 
     def on_project_drag_data_get(self, widget, context, selection_data, info, timestamp, project):
         selection_data.set_text(f"project:{project['title']}", -1)
@@ -526,26 +398,18 @@ class WorldMapView(Gtk.ScrolledWindow):
     def _move_terminal_in_layout(self, dragged_uuid, target_project, target_index=None):
         if not dragged_uuid: return
         
-        source_project_title = ""
-        for p in self.layout['projects']:
-            if dragged_uuid in p['terminals']:
-                source_project_title = p['title']
-                p['terminals'].remove(dragged_uuid)
-                break
-        
-        if target_index is not None:
-            target_project['terminals'].insert(target_index, dragged_uuid)
-        else:
-            target_project['terminals'].append(dragged_uuid)
-        
-        self._save_layout()
+        source_project, _ = self.layout.get_project_and_index_by_terminal_uuid(dragged_uuid)
+        if not source_project: return
+        self.layout.move_terminal_to_project(dragged_uuid, target_project['title'], target_index)
         
         # Optimized Redraw
         all_terminals_map = {str(term.uuid): (term, self.guake_app.get_notebook().page_num(term.get_parent().get_root_box())) for term in self.guake_app.get_notebook().iter_terminals()}
-        source_project = next((p for p in self.layout['projects'] if p['title'] == source_project_title), None)
+        log.info(f"Moved terminal {dragged_uuid} from project '{source_project['title']}' to '{target_project['title']}'")
         if source_project:
+            log.info(f"Redrawing project grid for '{source_project['title']}'")
             self._redraw_project_grid(source_project, all_terminals_map)
-        if source_project_title != target_project['title']:
+        if source_project['title'] != target_project['title']:
+            log.info(f"Redrawing project grid for '{target_project['title']}'")
             self._redraw_project_grid(target_project, all_terminals_map)
 
     def on_any_drop_on_project_frame(self, widget, context, x, y, selection_data, info, timestamp, target_project):
@@ -558,17 +422,13 @@ class WorldMapView(Gtk.ScrolledWindow):
             dragged_project_title = data.split(":", 1)[1]
             if dragged_project_title == target_project['title']: return
 
-            dragged_idx = next((i for i, p in enumerate(self.layout['projects']) if p['title'] == dragged_project_title), -1)
-            
-            if dragged_idx != -1:
-                dragged_item = self.layout['projects'].pop(dragged_idx)
-                target_idx = next((i for i, p in enumerate(self.layout['projects']) if p['title'] == target_project['title']), -1)
-                self.layout['projects'].insert(target_idx, dragged_item)
-                self._save_layout()
-                self.populate_map()
+            log.debug(f"Dropped project '{dragged_project_title}' onto project '{target_project['title']}'")
+            self.layout.handle_drop(dragged_project_title, target_project['title'])
+            self.populate_map()
 
         elif data.startswith("terminal:"):
             dragged_uuid = data.split(":", 1)[1]
+            log.debug(f"Dropped terminal '{dragged_uuid}' onto project '{target_project['title']}'")
             self._move_terminal_in_layout(dragged_uuid, target_project)
 
     def on_terminal_drop_on_grid(self, widget, context, x, y, selection_data, info, timestamp, target_project):
@@ -585,11 +445,8 @@ class WorldMapView(Gtk.ScrolledWindow):
         dragged_uuid = data.split(":", 1)[1]
         if dragged_uuid == target_uuid: return
 
-        target_project, target_idx = None, -1
-        for p in self.layout['projects']:
-            if target_uuid in p['terminals']:
-                target_project, target_idx = p, p['terminals'].index(target_uuid)
-                break
+        target_project, target_idx = self.layout.get_project_and_index_by_terminal_uuid(target_uuid)
+        if not target_project: return
         if target_project:
             self._move_terminal_in_layout(dragged_uuid, target_project, target_idx)
 
@@ -611,7 +468,7 @@ class WorldMapView(Gtk.ScrolledWindow):
         send_to_item = Gtk.MenuItem(label="Send to Project")
         send_to_submenu = Gtk.Menu()
         send_to_item.set_submenu(send_to_submenu)
-        project_titles = self.get_project_titles()
+        project_titles = self.layout.get_project_titles()
         if not project_titles:
             send_to_item.set_sensitive(False)
         else:
@@ -626,7 +483,8 @@ class WorldMapView(Gtk.ScrolledWindow):
 
     def on_send_to_project_activated(self, widget, terminal_uuid, project_title):
         log.debug(f"Sending terminal {terminal_uuid} to project '{project_title}'")
-        self._move_terminal_in_layout(terminal_uuid, next(p for p in self.layout['projects'] if p['title'] == project_title))
+        project = self.layout.get_project_by_title(project_title)
+        self._move_terminal_in_layout(terminal_uuid, project)
 
     def on_key_press(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:
@@ -635,15 +493,12 @@ class WorldMapView(Gtk.ScrolledWindow):
             return True
         return False
         
-    def get_project_titles(self):
-        self._load_layout() 
-        return [p['title'] for p in self.layout.get('projects', [])]
 
     def move_terminal_to_project(self, terminal_uuid, target_project_title):
         if not terminal_uuid or not target_project_title: return
         self._load_layout()
         
-        target_project = next((p for p in self.layout['projects'] if p['title'] == target_project_title), None)
+        target_project = self.layout.get_project_by_title(target_project_title)
         if not target_project: return
 
         self._move_terminal_in_layout(terminal_uuid, target_project)
