@@ -193,10 +193,6 @@ class Guake(SimpleGladeApp):
         self.mainframe = self.get_widget("mainframe")
         self.mainframe.remove(self.get_widget("notebook-teminals"))
 
-        # World Map View Initialization
-        self.world_map_view = WorldMapView(self)
-        self.world_map_visible = False
-
         # Pending restore for terminal split after show-up
         #     [(RootTerminalBox, TerminaBox, panes), ...]
         self.pending_restore_page_split = []
@@ -244,6 +240,10 @@ class Guake(SimpleGladeApp):
 
         self.window.connect("focus-out-event", self.on_window_losefocus)
         self.window.connect("focus-in-event", self.on_window_takefocus)
+
+        # World Map View Initialization
+        self.world_map_view = WorldMapView(self)
+        self.world_map_visible = False
 
         # Handling the delete-event of the main window to avoid
         # problems when closing it.
@@ -1604,7 +1604,7 @@ class Guake(SimpleGladeApp):
             # --- Hide Terminals and Show Map ---
             # The notebook is visible, so we switch to the map.
             # First, ensure the map is up-to-date with current terminals.
-            self.world_map_view.populate_map()
+            self.world_map_view.refresh_view(force_data_update=False)
 
             self.mainframe.remove(current_notebook)
             self.mainframe.pack_start(self.world_map_view, True, True, 0)
