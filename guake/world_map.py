@@ -254,7 +254,8 @@ class WorldMapView(Gtk.ScrolledWindow):
 
     def _create_terminal_preview(self, terminal, page_num):
         notebook = self.guake_app.get_notebook()
-        title = notebook.get_tab_label_text(notebook.get_nth_page(page_num)) or f"Terminal {page_num + 1}"
+        terminal_name = notebook.get_tab_text_index(page_num) or "Terminal"
+        title = f"{terminal_name} (#{page_num + 1})"
         button = Gtk.Button()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=5)
         button.add(box)
