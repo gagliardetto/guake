@@ -68,9 +68,9 @@ class WorldMapView(Gtk.ScrolledWindow):
                 background-color: @theme_hover_bg_color;
                 border-color: @theme_selected_bg_color;
             }
-            .git-status-clean { color: #26A269; } 
-            .git-status-dirty { color: #FF7800; } 
-            .git-status-untracked { color: #F6D32D; } 
+            .git-status-clean { color: #26A269; }
+            .git-status-dirty { color: #FF7800; }
+            .git-status-untracked { color: #F6D32D; }
             .git-status-nogit { opacity: 0.4; }
         """)
         self.get_style_context().add_class("world-map-view")
@@ -93,6 +93,10 @@ class WorldMapView(Gtk.ScrolledWindow):
         new_project_button.connect("clicked", self.on_new_project_clicked)
         header_bar.pack_start(new_project_button, False, False, 0)
 
+        self.toggle_all_button = Gtk.Button.new_with_label("Collapse All")
+        self.toggle_all_button.connect("clicked", self.on_toggle_all_clicked)
+        header_bar.pack_start(self.toggle_all_button, False, False, 0)
+
         self.search_entry = Gtk.SearchEntry()
         self.search_entry.set_placeholder_text("Filter by name, CWD, or tag:value...")
         self.search_entry.connect("search-changed", self.on_filter_changed)
@@ -113,6 +117,14 @@ class WorldMapView(Gtk.ScrolledWindow):
 
     def populate_map(self):
         """Clears and rebuilds the entire world map view based on the current layout and filters."""
+        # Update the toggle all button's label based on the current state
+        if hasattr(self, 'toggle_all_button'):
+            is_any_expanded = any(p.get('expanded', True) for p in self.layout.layout.get('projects', []))
+            if is_any_expanded:
+                self.toggle_all_button.set_label("Collapse All")
+            else:
+                self.toggle_all_button.set_label("Expand All")
+        
         # Clear all existing widgets from the main container
         for child in self.main_box.get_children():
             self.main_box.remove(child)
@@ -483,6 +495,16 @@ class WorldMapView(Gtk.ScrolledWindow):
             self.layout.delete_project(project_to_delete['title'])
             log.info(f"Deleted project '{project_to_delete['title']}'")
             self.populate_map()
+
+    def on_toggle_all_clicked(self, widget):
+        """Collapses or expands all projects at once."""
+        is_any_expanded = any(p.get('expanded', True) for p in self.layout.layout.get('projects', []))
+
+        for project in self.layout.layout.get('projects', []):
+            project['expanded'] = not is_any_expanded
+        
+        self.layout.save()
+        self.populate_map()
 
     def on_toggle_expand_clicked(self, widget, project_title):
         """Toggles the expanded state of a project."""
