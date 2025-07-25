@@ -191,6 +191,8 @@ class Guake(SimpleGladeApp):
         self.window.set_name("guake-terminal")
         self.window.set_keep_above(True)
         self.mainframe = self.get_widget("mainframe")
+        self.sidebar_revealer = self.get_widget("sidebar_revealer")
+        self.sidebar_hide_timer = None
         self.mainframe.remove(self.get_widget("notebook-teminals"))
 
         # Pending restore for terminal split after show-up
@@ -238,6 +240,8 @@ class Guake(SimpleGladeApp):
         # store the default window title to reset it when update is not wanted
         self.default_window_title = self.window.get_title()
 
+        self.window.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
+        self.window.connect("motion-notify-event", self.on_window_motion)
         self.window.connect("focus-out-event", self.on_window_losefocus)
         self.window.connect("focus-in-event", self.on_window_takefocus)
 
@@ -1127,6 +1131,30 @@ class Guake(SimpleGladeApp):
     def accel_toggle_fullscreen(self, *args):
         self.fullscreen_manager.toggle()
         return True
+
+    def on_window_motion(self, widget, event):
+        """Handles mouse motion to show/hide the sidebar."""
+        sidebar_width = self.sidebar_revealer.get_allocated_width()
+        hot_edge_width = 1  # pixels to trigger the sidebar
+
+        # If mouse is on the left edge, show the sidebar
+        if event.x < hot_edge_width:
+            if self.sidebar_hide_timer:
+                GLib.source_remove(self.sidebar_hide_timer)
+                self.sidebar_hide_timer = None
+            if not self.sidebar_revealer.get_reveal_child():
+                self.sidebar_revealer.set_reveal_child(True)
+        # If the sidebar is revealed and the mouse moves away from it
+        elif self.sidebar_revealer.get_reveal_child() and event.x > sidebar_width:
+            if not self.sidebar_hide_timer:
+                # Hide after a short delay
+                self.sidebar_hide_timer = GLib.timeout_add(300, self.hide_sidebar_timeout)
+
+    def hide_sidebar_timeout(self):
+        """Callback for the timer to hide the sidebar."""
+        self.sidebar_revealer.set_reveal_child(False)
+        self.sidebar_hide_timer = None
+        return False  # Do not repeat the timer
 
     def fullscreen(self):
         self.fullscreen_manager.fullscreen()

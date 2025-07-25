@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Generated with glade 3.18.3 -->
 <interface domain="guake">
-  <requires lib="gtk+" version="3.10"/>
+  <requires lib="gtk+" version="3.10" />
   <object class="GtkMenu" id="tray-menu">
     <property name="visible">True</property>
     <property name="can_focus">False</property>
@@ -12,7 +12,7 @@
         <property name="can_focus">False</property>
         <property name="use_underline">True</property>
         <property name="use_stock">True</property>
-        <signal name="activate" handler="show_prefs" swapped="no"/>
+        <signal name="activate" handler="show_prefs" swapped="no" />
       </object>
     </child>
     <child>
@@ -22,7 +22,7 @@
         <property name="can_focus">False</property>
         <property name="use_underline">True</property>
         <property name="use_stock">True</property>
-        <signal name="activate" handler="show_about" swapped="no"/>
+        <signal name="activate" handler="show_about" swapped="no" />
       </object>
     </child>
     <child>
@@ -37,7 +37,7 @@
         <property name="visible">True</property>
         <property name="can_focus">False</property>
         <property name="use_stock">False</property>
-        <signal name="activate" handler="accel_quit" swapped="no"/>
+        <signal name="activate" handler="accel_quit" swapped="no" />
       </object>
     </child>
   </object>
@@ -50,27 +50,79 @@
     <property name="urgency_hint">True</property>
     <property name="decorated">False</property>
     <child>
-      <object class="GtkBox" id="mainframe">
+      <object class="GtkOverlay" id="overlay">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
-        <property name="orientation">vertical</property>
         <child>
-          <object class="GtkNotebook" id="notebook-teminals">
-            <property name="name">notebook-teminals</property>
+          <object class="GtkBox" id="mainframe">
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
-            <property name="has_focus">True</property>
-            <property name="is_focus">True</property>
-            <property name="tab_pos">bottom</property>
-            <property name="show_tabs">False</property>
-            <property name="show_border">False</property>
-            <property name="enable_popup">True</property>
+            <property name="can_focus">False</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkNotebook" id="notebook-teminals">
+                <property name="name">notebook-teminals</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="has_focus">True</property>
+                <property name="is_focus">True</property>
+                <property name="tab_pos">bottom</property>
+                <property name="show_tabs">False</property>
+                <property name="show_border">False</property>
+                <property name="enable_popup">True</property>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
           </object>
-          <packing>
-            <property name="expand">True</property>
-            <property name="fill">True</property>
-            <property name="position">0</property>
-          </packing>
+        </child>
+        <child type="overlay">
+          <object class="GtkRevealer" id="sidebar_revealer">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="halign">start</property>
+            <property name="valign">fill</property>
+            <property name="reveal_child">False</property>
+            <property name="transition_type">slide-right</property>
+            <child>
+              <object class="GtkBox" id="sidebar_box">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <property name="margin_start">6</property>
+                <property name="margin_end">6</property>
+                <property name="margin_top">6</property>
+                <property name="margin_bottom">6</property>
+                <child>
+                  <object class="GtkLabel" id="label1">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="label" translatable="yes">Sidebar Item 1</property>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="label2">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="label" translatable="yes">Sidebar Item 2</property>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+              </object>
+            </child>
+          </object>
         </child>
       </object>
     </child>
