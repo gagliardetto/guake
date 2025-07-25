@@ -73,7 +73,7 @@ class WorkspaceManager:
                         log.info("Malformed workspaces file backed up to %s", backup_path)
                     except Exception as backup_error:
                         log.error("Could not create backup of workspaces file: %s", backup_error)
-                    
+
                     self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
                     self.save_workspaces()
 
@@ -150,7 +150,8 @@ class WorkspaceManager:
 
     def _build_workspace_list(self):
         """
-        Builds the listbox that will contain the workspaces from the loaded data.
+        Builds the listbox that will contain the workspaces from the loaded data,
+        separating pinned workspaces.
         """
         if hasattr(self, "scrolled_window"):
             self.widget.remove(self.scrolled_window)
@@ -159,12 +160,35 @@ class WorkspaceManager:
         self.workspace_listbox = Gtk.ListBox()
         self.workspace_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
 
-        workspaces = sorted(
-            self.workspaces_data.get("workspaces", []),
-            key=lambda w: (not w.get("is_pinned", False), w.get("name")),
+        all_workspaces = self.workspaces_data.get("workspaces", [])
+        pinned_workspaces = sorted(
+            [w for w in all_workspaces if w.get("is_pinned")],
+            key=lambda w: w.get("updated_at", ""),
+            reverse=True,
         )
+        unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
 
-        for ws_data in workspaces:
+        if pinned_workspaces:
+            # Add a non-selectable header for pinned workspaces
+            pinned_header = Gtk.ListBoxRow()
+            pinned_header.set_selectable(False)
+            header_label = Gtk.Label(label="📌 Pinned", xalign=0)
+            header_label.get_style_context().add_class("dim-label")
+            pinned_header.add(header_label)
+            self.workspace_listbox.add(pinned_header)
+
+            for ws_data in pinned_workspaces:
+                row = self.create_workspace_row(ws_data)
+                self.workspace_listbox.add(row)
+
+            if unpinned_workspaces:
+                # Add a separator if there are also unpinned workspaces
+                separator_row = Gtk.ListBoxRow()
+                separator_row.set_selectable(False)
+                separator_row.add(Gtk.Separator())
+                self.workspace_listbox.add(separator_row)
+
+        for ws_data in unpinned_workspaces:
             row = self.create_workspace_row(ws_data)
             self.workspace_listbox.add(row)
 
@@ -254,29 +278,62 @@ class WorkspaceManager:
         self.guake_app.add_tab()
 
     def on_rename_workspace(self, menu_item, workspace_id):
-        """Opens a dialog to rename the workspace."""
+        """Opens a dialog to rename the workspace and change its icon."""
         ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
         if not ws:
             return
 
         dialog = Gtk.Dialog(
-            title="Rename Workspace",
+            title="Edit Workspace",
             parent=self.guake_app.window,
             flags=0,
             buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK),
         )
-        dialog.set_default_size(300, 100)
-        entry = Gtk.Entry(text=ws["name"])
-        box = dialog.get_content_area()
-        box.add(entry)
+        dialog.set_default_size(350, 100)
+        content_area = dialog.get_content_area()
+        grid = Gtk.Grid(column_spacing=10, row_spacing=10, margin=10)
+        content_area.add(grid)
+
+        # Icon entry
+        icon_label = Gtk.Label(label="Icon:", xalign=0)
+        icon_entry = Gtk.Entry(text=ws.get("icon", ""))
+        icon_entry.set_max_length(2)  # For single emoji/character
+
+        # Name entry
+        name_label = Gtk.Label(label="Name:", xalign=0)
+        name_entry = Gtk.Entry(text=ws["name"])
+        name_entry.connect("activate", lambda _: dialog.response(Gtk.ResponseType.OK))
+
+        # Add red border style for validation
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b".error { border: 1px solid red; border-radius: 4px; }")
+        name_entry.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        name_entry.connect("changed", lambda entry: entry.get_style_context().remove_class("error"))
+
+        grid.attach(icon_label, 0, 0, 1, 1)
+        grid.attach(icon_entry, 1, 0, 1, 1)
+        grid.attach(name_label, 0, 1, 1, 1)
+        grid.attach(name_entry, 1, 1, 1, 1)
+
         dialog.show_all()
 
-        response = dialog.run()
-        if response == Gtk.ResponseType.OK:
-            ws["name"] = entry.get_text()
-            ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
-            self.save_workspaces()
-            self._build_workspace_list()
+        while True:
+            response = dialog.run()
+            if response == Gtk.ResponseType.OK:
+                name_text = name_entry.get_text().strip()
+                if not name_text:
+                    name_entry.get_style_context().add_class("error")
+                    continue  # Keep dialog open
+                else:
+                    ws["name"] = name_text
+                    ws["icon"] = icon_entry.get_text()
+                    ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                    self.save_workspaces()
+                    self._build_workspace_list()
+                    break  # Exit loop
+            else:
+                break  # Exit loop on Cancel or close
+
         dialog.destroy()
 
     def on_delete_workspace(self, menu_item, workspace_id):
