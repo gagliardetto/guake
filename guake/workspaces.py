@@ -279,6 +279,7 @@ class WorkspaceManager:
 
         self.scrolled_window = Gtk.ScrolledWindow()
         self.scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scrolled_window.set_vexpand(True)
         self.scrolled_window.add(self.workspace_listbox)
         self.scrolled_window.show_all()
 
