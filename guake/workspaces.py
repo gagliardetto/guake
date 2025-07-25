@@ -11,7 +11,7 @@ import shutil
 from datetime import datetime
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gio, Gdk
+from gi.repository import Gtk, Gio, Gdk, GLib
 
 import logging
 
@@ -163,6 +163,7 @@ class WorkspaceManager:
         # Set the ListBox as the destination for DnD
         self.workspace_listbox.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
         self.workspace_listbox.connect("drag-motion", self.on_drag_motion)
+        self.workspace_listbox.connect("drag-drop", self.on_drag_drop)
         self.workspace_listbox.connect("drag-data-received", self.on_drag_data_received)
 
         all_workspaces = self.workspaces_data.get("workspaces", [])
@@ -219,6 +220,7 @@ class WorkspaceManager:
 
         event_box = Gtk.EventBox()
         list_box_row.add(event_box)
+        event_box.set_visible_window(False)  # CRITICAL FIX: Makes EventBox transparent for events
 
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row_box.set_margin_top(4)
@@ -236,6 +238,7 @@ class WorkspaceManager:
         if not is_pinned:
             event_box.connect("drag-begin", self.on_row_drag_begin)
             event_box.connect("drag-data-get", self.on_row_drag_data_get)
+            event_box.connect("drag-data-delete", self.on_row_drag_data_delete)
             event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
 
         add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
@@ -286,29 +289,61 @@ class WorkspaceManager:
     def on_row_drag_begin(self, widget, context):
         """Select the row when a drag operation begins. `widget` is the EventBox."""
         row = widget.get_parent()
-        log.debug("Drag Begin on row: %s", row.get_name())
+        unpinned_workspaces = [w for w in self.workspaces_data["workspaces"] if not w.get("is_pinned")]
+        dragged_ws = next((w for w in unpinned_workspaces if w["id"] == row.get_name()), None)
+        if dragged_ws:
+            start_pos = unpinned_workspaces.index(dragged_ws)
+            log.debug("Drag Begin on row: %s at start position: %d", row.get_name(), start_pos)
         self.workspace_listbox.select_row(row)
 
     def on_drag_motion(self, listbox, context, x, y, timestamp):
         """Highlight rows that are valid drop targets."""
         drop_row = listbox.get_row_at_y(y)
+        target_is_valid = False
         if drop_row and drop_row.get_name():
             ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == drop_row.get_name()), None)
             if ws and not ws.get("is_pinned"):
-                listbox.drag_highlight_row(drop_row)
-                return True
-        listbox.drag_unhighlight_row()
+                target_is_valid = True
+                unpinned_workspaces = [w for w in self.workspaces_data["workspaces"] if not w.get("is_pinned")]
+                hover_ws = next((w for w in unpinned_workspaces if w["id"] == drop_row.get_name()), None)
+                if hover_ws:
+                    hover_pos = unpinned_workspaces.index(hover_ws)
+                    log.debug("Drag Hover over potential new position: %d", hover_pos)
+
+        if target_is_valid:
+            listbox.drag_highlight_row(drop_row)
+            Gdk.drag_status(context, Gdk.DragAction.MOVE, timestamp)
+        else:
+            listbox.drag_unhighlight_row()
+        
+        return target_is_valid
+
+    def on_drag_drop(self, listbox, context, x, y, timestamp):
+        """Handles the drag-drop signal, returning True to allow the drop."""
+        log.debug("Drag Drop signal fired.")
+        drop_row = listbox.get_row_at_y(y)
+        if drop_row and drop_row.get_name():
+            target_atom = Gdk.Atom.intern(DND_TARGET[0].target, False)
+            listbox.drag_get_data(context, target_atom, timestamp)
+            return True
         return False
 
     def on_row_drag_data_get(self, widget, context, selection, info, timestamp):
         """Set the drag data to the row's name (workspace ID). `widget` is the EventBox."""
         row = widget.get_parent()
         log.debug("Drag Data Get for row: %s", row.get_name())
-        selection.set_text(row.get_name(), -1)
+        target_atom = Gdk.Atom.intern(DND_TARGET[0].target, False)
+        selection.set(target_atom, 8, row.get_name().encode('utf-8'))
+
+    def on_row_drag_data_delete(self, widget, context):
+        """Handle the deletion of the data from the source. `widget` is the EventBox."""
+        log.debug("Drag Data Delete for row: %s", widget.get_parent().get_name())
+        # The data is managed in our model, so we don't need to do anything here,
+        # but the signal must be handled for the MOVE action to be considered complete.
 
     def on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
         """Handle the drop and reorder the workspaces. `widget` is the ListBox."""
-        dragged_ws_id = selection.get_text()
+        dragged_ws_id = selection.get_data().decode('utf-8')
         drop_row = widget.get_row_at_y(y)
         log.debug("Drag Data Received. Dragged ID: %s", dragged_ws_id)
 
@@ -338,6 +373,7 @@ class WorkspaceManager:
                 return
 
             drop_index_in_unpinned = unpinned_workspaces.index(drop_ws)
+            log.debug("Drop position index: %d", drop_index_in_unpinned)
 
             log.debug("Reordering unpinned list. From index %d to %d", dragged_index_in_unpinned, drop_index_in_unpinned)
             moved_item = unpinned_workspaces.pop(dragged_index_in_unpinned)
@@ -345,11 +381,15 @@ class WorkspaceManager:
 
             pinned_workspaces = [w for w in all_workspaces if w.get("is_pinned")]
             self.workspaces_data["workspaces"] = pinned_workspaces + unpinned_workspaces
+            log.debug("Reordering of workspaces data complete.")
 
             self.save_workspaces()
-            self._build_workspace_list()
-            log.debug("Reorder successful.")
-            context.finish(True, False, timestamp)
+            
+            # Defer the UI rebuild to prevent conflicts with the DND operation
+            GLib.idle_add(self._build_workspace_list)
+            
+            log.debug("Successful drop. Reordering and saving to workspaces.json complete.")
+            context.finish(True, True, timestamp) # IMPORTANT: Set del=True for MOVE action
 
         except (StopIteration, ValueError) as e:
             log.error("Error during reorder logic: %s", e)
