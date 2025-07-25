@@ -54,6 +54,17 @@ class WorkspaceManager:
         self._git_status_cache = {}
         self._refresh_timer_id = None
 
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            .git-status-clean { color: #26A269; }
+            .git-status-dirty { color: #FF7800; }
+            .git-status-untracked { color: #F6D32D; }
+            .git-status-nogit { opacity: 0.4; }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         self.load_workspaces()
         self._build_header()
         self._build_workspace_list()
@@ -346,6 +357,7 @@ class WorkspaceManager:
             icon_name, tooltip = self._get_git_icon_and_tooltip(status)
             git_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
             git_icon.set_tooltip_text(tooltip)
+            git_icon.get_style_context().add_class(f"git-status-{status}")
             row_box.pack_end(git_icon, False, False, 0)
 
         return list_box_row
@@ -642,19 +654,45 @@ class WorkspaceManager:
         return True
 
     def _update_git_status_cache(self):
-        """Updates the internal cache of workspace git statuses."""
+        """Updates the internal cache of workspace git statuses using a more efficient directory-based approach."""
         log.debug("Updating workspace git status cache.")
+        
+        all_terminals = list(self.guake_app.notebook_manager.iter_terminals())
+        unique_dirs = set()
+        for term in all_terminals:
+            try:
+                unique_dirs.add(term.get_current_directory())
+            except Exception:
+                continue
+
+        dir_status_cache = {}
+        # Sort directories by path length to process parents before children
+        sorted_dirs = sorted(list(unique_dirs), key=len)
+
+        for directory in sorted_dirs:
+            # Hierarchical check: if a parent is dirty, this one is too.
+            parent = Path(directory).parent
+            while str(parent) != parent.root:
+                if str(parent) in dir_status_cache and dir_status_cache[str(parent)] == 'dirty':
+                    dir_status_cache[directory] = 'dirty'
+                    break
+                parent = parent.parent
+            else: # No dirty parent found
+                dir_status_cache[directory] = self._get_git_status(directory)
+
+        # Now, determine the status for each workspace
         for ws in self.get_all_workspaces():
             if ws.get("is_special"):
                 continue
             
             statuses = set()
-            for term_uuid in ws.get("terminals", []):
-                terminal = self.guake_app.notebook_manager.get_terminal_by_uuid(uuid.UUID(term_uuid))
+            for term_uuid_str in ws.get("terminals", []):
+                terminal = self.guake_app.notebook_manager.get_terminal_by_uuid(uuid.UUID(term_uuid_str))
                 if terminal:
                     try:
                         cwd = terminal.get_current_directory()
-                        statuses.add(self._get_git_status(cwd))
+                        if cwd in dir_status_cache:
+                            statuses.add(dir_status_cache[cwd])
                     except Exception:
                         statuses.add('no-git')
             
