@@ -199,20 +199,18 @@ class MyListBoxRow(Gtk.ListBoxRow):
         self.workspace_id = workspace_id
         self.workspace_name = workspace_name
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_margin_start(20)
-        grid.set_margin_end(20)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
 
         label = Gtk.Label()
         label.set_markup(f"<span font_desc='Iosevka, Arial, Helvetica, sans-serif Bold 15'>{tab_label}</span>")
         label.set_xalign(0)
-        label.set_hexpand(True)
-
+        
         ws_label = Gtk.Label()
         ws_label.set_markup(f"<small>{workspace_name}</small>")
         ws_label.set_xalign(0)
-        ws_label.set_hexpand(False)
+        ws_label.set_size_request(150, -1)
 
         cwd = Gtk.Label()
         cwd.set_markup(f"<span font_desc='Iosevka Term, Arial, Helvetica, sans-serif 15'>{tab_cwd}</span>")
@@ -220,11 +218,11 @@ class MyListBoxRow(Gtk.ListBoxRow):
         cwd.set_hexpand(True)
         cwd.set_ellipsize(Pango.EllipsizeMode.START)
 
-        grid.attach(label, 0, 0, 1, 1)
-        grid.attach_next_to(ws_label, label, Gtk.PositionType.RIGHT, 1, 1)
-        grid.attach_next_to(cwd, ws_label, Gtk.PositionType.RIGHT, 1, 1)
+        box.pack_start(label, True, True, 0)
+        box.pack_start(ws_label, False, False, 0)
+        box.pack_start(cwd, True, True, 0)
 
-        self.add(grid)
+        self.add(box)
 
 class QuickTabNavigationDialog(Gtk.Dialog):
     def __init__(self, window, notebook_manager, workspace_manager):
