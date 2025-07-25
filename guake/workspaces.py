@@ -159,6 +159,7 @@ class WorkspaceManager:
 
         self.workspace_listbox = Gtk.ListBox()
         self.workspace_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.workspace_listbox.connect("row-activated", self.on_workspace_activated)
 
         all_workspaces = self.workspaces_data.get("workspaces", [])
         pinned_workspaces = sorted(
@@ -169,7 +170,6 @@ class WorkspaceManager:
         unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
 
         if pinned_workspaces:
-            # Add a non-selectable header for pinned workspaces
             pinned_header = Gtk.ListBoxRow()
             pinned_header.set_selectable(False)
             header_label = Gtk.Label(label="📌 Pinned", xalign=0)
@@ -182,15 +182,25 @@ class WorkspaceManager:
                 self.workspace_listbox.add(row)
 
             if unpinned_workspaces:
-                # Add a separator if there are also unpinned workspaces
                 separator_row = Gtk.ListBoxRow()
                 separator_row.set_selectable(False)
-                separator_row.add(Gtk.Separator())
+                separator = Gtk.Separator()
+                separator.set_margin_top(5)
+                separator.set_margin_bottom(5)
+                separator_row.add(separator)
                 self.workspace_listbox.add(separator_row)
 
         for ws_data in unpinned_workspaces:
             row = self.create_workspace_row(ws_data)
             self.workspace_listbox.add(row)
+
+        # After populating, select the active row
+        active_workspace_id = self.workspaces_data.get("active_workspace")
+        if active_workspace_id:
+            for row in self.workspace_listbox.get_children():
+                if row.get_name() == active_workspace_id:
+                    self.workspace_listbox.select_row(row)
+                    break
 
         self.scrolled_window = Gtk.ScrolledWindow()
         self.scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -202,27 +212,24 @@ class WorkspaceManager:
     def create_workspace_row(self, ws_data):
         """Creates a Gtk.ListBoxRow for a single workspace."""
         list_box_row = Gtk.ListBoxRow()
+        list_box_row.set_name(ws_data["id"])  # Store ID on the widget for later retrieval
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row_box.set_margin_top(4)
         row_box.set_margin_bottom(4)
         row_box.set_margin_start(8)
         row_box.set_margin_end(8)
 
-        # Add terminal button
         add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
         add_button = Gtk.Button(image=add_icon, relief=Gtk.ReliefStyle.NONE)
         add_button.connect("clicked", self.on_add_terminal_to_workspace, ws_data["id"])
 
-        # Workspace label (name and icon)
         label_text = f"{ws_data.get('icon', '')} {ws_data['name']}"
         label = Gtk.Label(label=label_text, xalign=0)
         label.set_hexpand(True)
 
-        # Pin icon (visible if pinned)
         pin_icon = Gtk.Image.new_from_icon_name("pin-symbolic", Gtk.IconSize.MENU)
         pin_icon.set_visible(ws_data.get("is_pinned", False))
 
-        # Workspace menu
         ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
         ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
         ws_menu = Gtk.Menu()
@@ -249,6 +256,40 @@ class WorkspaceManager:
 
         return list_box_row
 
+    def on_workspace_activated(self, listbox, row):
+        """Handles the activation of a workspace from the sidebar."""
+        workspace_id = row.get_name()
+        if not workspace_id:  # Ignore headers or separators
+            return
+
+        log.info("Activating workspace %s", workspace_id)
+        ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
+        if not ws:
+            return
+
+        self.workspaces_data["active_workspace"] = workspace_id
+        self.save_workspaces()
+
+        # TODO: This logic needs to be fully implemented in guake_app.py
+        # For now, this is a conceptual implementation.
+        # 1. Tell guake_app to switch to the notebook associated with this workspace.
+        # self.guake_app.switch_to_notebook_for_workspace(workspace_id)
+
+        # 2. Focus the active terminal or create a new one.
+        active_terminal_id = ws.get("active_terminal")
+        if active_terminal_id:
+            log.debug("Focusing active terminal: %s", active_terminal_id)
+            # success = self.guake_app.focus_terminal_by_uuid(active_terminal_id)
+            # if not success:
+            #     self.guake_app.add_tab() # And update active_terminal
+        else:
+            log.debug("No active terminal, creating a new one.")
+            # new_term = self.guake_app.add_tab(return_terminal=True)
+            # if new_term:
+            #     ws["active_terminal"] = new_term.uuid
+            #     self.save_workspaces()
+        listbox.select_row(row)
+
     def on_add_workspace(self, action, param):
         """Adds a new workspace to the data and UI."""
         log.info("Add workspace action triggered.")
@@ -274,7 +315,6 @@ class WorkspaceManager:
         """Callback to add a new terminal tab to a specific workspace."""
         log.info("Adding new terminal to workspace %s", workspace_id)
         # This needs to be coordinated with Guake's main logic
-        # For now, we just log it.
         self.guake_app.add_tab()
 
     def on_rename_workspace(self, menu_item, workspace_id):
@@ -294,15 +334,15 @@ class WorkspaceManager:
         grid = Gtk.Grid(column_spacing=10, row_spacing=10, margin=10)
         content_area.add(grid)
 
-        # Icon entry
-        icon_label = Gtk.Label(label="Icon:", xalign=0)
-        icon_entry = Gtk.Entry(text=ws.get("icon", ""))
-        icon_entry.set_max_length(2)  # For single emoji/character
-
         # Name entry
         name_label = Gtk.Label(label="Name:", xalign=0)
         name_entry = Gtk.Entry(text=ws["name"])
         name_entry.connect("activate", lambda _: dialog.response(Gtk.ResponseType.OK))
+
+        # Icon entry
+        icon_label = Gtk.Label(label="Icon:", xalign=0)
+        icon_entry = Gtk.Entry(text=ws.get("icon", ""))
+        icon_entry.set_max_length(2)  # For single emoji/character
 
         # Add red border style for validation
         css_provider = Gtk.CssProvider()
@@ -310,10 +350,10 @@ class WorkspaceManager:
         name_entry.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         name_entry.connect("changed", lambda entry: entry.get_style_context().remove_class("error"))
 
-        grid.attach(icon_label, 0, 0, 1, 1)
-        grid.attach(icon_entry, 1, 0, 1, 1)
-        grid.attach(name_label, 0, 1, 1, 1)
-        grid.attach(name_entry, 1, 1, 1, 1)
+        grid.attach(name_label, 0, 0, 1, 1)
+        grid.attach(name_entry, 1, 0, 1, 1)
+        grid.attach(icon_label, 0, 1, 1, 1)
+        grid.attach(icon_entry, 1, 1, 1, 1)
 
         dialog.show_all()
 
@@ -323,16 +363,16 @@ class WorkspaceManager:
                 name_text = name_entry.get_text().strip()
                 if not name_text:
                     name_entry.get_style_context().add_class("error")
-                    continue  # Keep dialog open
+                    continue
                 else:
                     ws["name"] = name_text
                     ws["icon"] = icon_entry.get_text()
                     ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
                     self.save_workspaces()
                     self._build_workspace_list()
-                    break  # Exit loop
+                    break
             else:
-                break  # Exit loop on Cancel or close
+                break
 
         dialog.destroy()
 
