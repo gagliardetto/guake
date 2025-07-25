@@ -399,7 +399,7 @@ class TerminalNotebook(Gtk.Notebook):
         notebook page"""
         if self.guake.settings.general.get_boolean("window-tabbar"):
             if self.guake.settings.general.get_boolean("hide-tabs-if-one-tab"):
-                self.set_property("show-tabs", self.get_n_pages() != 1)
+                self.set_property("show-tabs", self.get_n_pages() > 1)
             else:
                 self.set_property("show-tabs", True)
 

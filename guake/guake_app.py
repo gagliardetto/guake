@@ -1147,6 +1147,19 @@ class Guake(SimpleGladeApp):
             submenu.append(ws_item)
         submenu.show_all()
 
+    def on_populate_move_to_workspace_menu(self, menu_item, submenu, terminal_uuid):
+        # Clear existing items
+        for child in submenu.get_children():
+            submenu.remove(child)
+            
+        workspaces = self.workspace_manager.get_all_workspaces()
+        for ws in workspaces:
+            if ws.get("is_special"): continue
+            ws_item = Gtk.MenuItem(label=f"{ws.get('icon', '')} {ws['name']}")
+            ws_item.connect("activate", self.on_send_terminal_to_workspace, terminal_uuid, ws["id"])
+            submenu.append(ws_item)
+        submenu.show_all()
+
     def on_send_terminal_to_workspace(self, menu_item, terminal_uuid, target_workspace_id):
         log.debug("Sending terminal %s to workspace %s", terminal_uuid, target_workspace_id)
         self.workspace_manager.move_terminal_to_workspace(terminal_uuid, target_workspace_id)
