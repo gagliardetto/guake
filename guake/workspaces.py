@@ -585,14 +585,33 @@ class WorkspaceManager:
         grid.attach(name_entry, 1, 0, 1, 1)
         grid.attach(Gtk.Label(label="Icon:", xalign=0), 0, 1, 1, 1)
         grid.attach(icon_entry, 1, 1, 1, 1)
+        
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b".error { border: 1px solid red; border-radius: 4px; }")
+        name_entry.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        
+        name_entry.connect("activate", lambda entry: dialog.response(Gtk.ResponseType.OK))
+        name_entry.connect("changed", lambda entry: entry.get_style_context().remove_class("error"))
+
         dialog.show_all()
 
-        if dialog.run() == Gtk.ResponseType.OK:
-            ws["name"] = name_entry.get_text().strip() or ws["name"]
-            ws["icon"] = icon_entry.get_text()
-            ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
-            self.save_workspaces()
-            self._build_workspace_list()
+        while True:
+            response = dialog.run()
+            if response == Gtk.ResponseType.OK:
+                name_text = name_entry.get_text().strip()
+                if not name_text:
+                    name_entry.get_style_context().add_class("error")
+                    continue
+                else:
+                    ws["name"] = name_text
+                    ws["icon"] = icon_entry.get_text()
+                    ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                    self.save_workspaces()
+                    self._build_workspace_list()
+                    break
+            else:
+                break
+        
         dialog.destroy()
 
     @save_tabs_when_changed
