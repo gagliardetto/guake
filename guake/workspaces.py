@@ -29,6 +29,8 @@ DEFAULT_WORKSPACES_CONFIG = {
     "workspaces": [],
 }
 
+DND_TARGET = [Gtk.TargetEntry.new("GTK_LIST_BOX_ROW", Gtk.TargetFlags.SAME_APP, 0)]
+
 
 class WorkspaceManager:
     """
@@ -60,20 +62,17 @@ class WorkspaceManager:
                 with self.config_path.open("r", encoding="utf-8") as f:
                     loaded_data = json.load(f)
 
-                # Validate that the loaded data is a dictionary with the expected key
                 if isinstance(loaded_data, dict) and "workspaces" in loaded_data:
                     self.workspaces_data = loaded_data
                     log.info("Workspaces loaded from %s", self.config_path)
                 else:
                     log.warning("workspaces.json is malformed. A backup will be created and settings reset.")
-                    # Backup the malformed file before overwriting
                     backup_path = self.config_path.with_name(f"{self.config_path.name}.bak")
                     try:
                         shutil.copy(self.config_path, backup_path)
                         log.info("Malformed workspaces file backed up to %s", backup_path)
                     except Exception as backup_error:
                         log.error("Could not create backup of workspaces file: %s", backup_error)
-
                     self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
                     self.save_workspaces()
 
@@ -151,7 +150,7 @@ class WorkspaceManager:
     def _build_workspace_list(self):
         """
         Builds the listbox that will contain the workspaces from the loaded data,
-        separating pinned workspaces.
+        separating pinned workspaces and enabling drag-and-drop.
         """
         if hasattr(self, "scrolled_window"):
             self.widget.remove(self.scrolled_window)
@@ -160,6 +159,11 @@ class WorkspaceManager:
         self.workspace_listbox = Gtk.ListBox()
         self.workspace_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.workspace_listbox.connect("row-activated", self.on_workspace_activated)
+
+        # Set the ListBox as the destination for DnD
+        self.workspace_listbox.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
+        self.workspace_listbox.connect("drag-motion", self.on_drag_motion)
+        self.workspace_listbox.connect("drag-data-received", self.on_drag_data_received)
 
         all_workspaces = self.workspaces_data.get("workspaces", [])
         pinned_workspaces = sorted(
@@ -178,7 +182,7 @@ class WorkspaceManager:
             self.workspace_listbox.add(pinned_header)
 
             for ws_data in pinned_workspaces:
-                row = self.create_workspace_row(ws_data)
+                row = self.create_workspace_row(ws_data, is_pinned=True)
                 self.workspace_listbox.add(row)
 
             if unpinned_workspaces:
@@ -191,10 +195,9 @@ class WorkspaceManager:
                 self.workspace_listbox.add(separator_row)
 
         for ws_data in unpinned_workspaces:
-            row = self.create_workspace_row(ws_data)
+            row = self.create_workspace_row(ws_data, is_pinned=False)
             self.workspace_listbox.add(row)
 
-        # After populating, select the active row
         active_workspace_id = self.workspaces_data.get("active_workspace")
         if active_workspace_id:
             for row in self.workspace_listbox.get_children():
@@ -209,15 +212,31 @@ class WorkspaceManager:
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
 
-    def create_workspace_row(self, ws_data):
+    def create_workspace_row(self, ws_data, is_pinned):
         """Creates a Gtk.ListBoxRow for a single workspace."""
         list_box_row = Gtk.ListBoxRow()
-        list_box_row.set_name(ws_data["id"])  # Store ID on the widget for later retrieval
+        list_box_row.set_name(ws_data["id"])
+
+        event_box = Gtk.EventBox()
+        list_box_row.add(event_box)
+
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row_box.set_margin_top(4)
         row_box.set_margin_bottom(4)
         row_box.set_margin_start(8)
         row_box.set_margin_end(8)
+        event_box.add(row_box)
+
+        # Enable pointer hand cursor on hover
+        event_box.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        event_box.connect("enter-notify-event", self.on_row_enter)
+        event_box.connect("leave-notify-event", self.on_row_leave)
+
+        # Set the EventBox as the source for DnD if it's not pinned
+        if not is_pinned:
+            event_box.connect("drag-begin", self.on_row_drag_begin)
+            event_box.connect("drag-data-get", self.on_row_drag_data_get)
+            event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
 
         add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
         add_button = Gtk.Button(image=add_icon, relief=Gtk.ReliefStyle.NONE)
@@ -227,15 +246,12 @@ class WorkspaceManager:
         label = Gtk.Label(label=label_text, xalign=0)
         label.set_hexpand(True)
 
-        pin_icon = Gtk.Image.new_from_icon_name("pin-symbolic", Gtk.IconSize.MENU)
-        pin_icon.set_visible(ws_data.get("is_pinned", False))
-
         ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
         ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
         ws_menu = Gtk.Menu()
         rename_item = Gtk.MenuItem(label="Rename")
         delete_item = Gtk.MenuItem(label="Delete")
-        pin_label = "Unpin" if ws_data.get("is_pinned", False) else "Pin"
+        pin_label = "Unpin" if is_pinned else "Pin"
         pin_item = Gtk.MenuItem(label=pin_label)
 
         rename_item.connect("activate", self.on_rename_workspace, ws_data["id"])
@@ -250,16 +266,99 @@ class WorkspaceManager:
 
         row_box.pack_start(add_button, False, False, 0)
         row_box.pack_start(label, True, True, 0)
-        row_box.pack_start(pin_icon, False, False, 0)
+        if is_pinned:
+            pin_icon = Gtk.Image.new_from_icon_name("pin-symbolic", Gtk.IconSize.MENU)
+            row_box.pack_start(pin_icon, False, False, 0)
         row_box.pack_start(ws_menu_button, False, False, 0)
-        list_box_row.add(row_box)
 
         return list_box_row
+
+    def on_row_enter(self, widget, event):
+        """Change cursor to a hand pointer."""
+        display = widget.get_display()
+        hand_cursor = Gdk.Cursor.new_for_display(display, Gdk.CursorType.HAND2)
+        widget.get_window().set_cursor(hand_cursor)
+
+    def on_row_leave(self, widget, event):
+        """Change cursor back to default."""
+        widget.get_window().set_cursor(None)
+
+    def on_row_drag_begin(self, widget, context):
+        """Select the row when a drag operation begins. `widget` is the EventBox."""
+        row = widget.get_parent()
+        log.debug("Drag Begin on row: %s", row.get_name())
+        self.workspace_listbox.select_row(row)
+
+    def on_drag_motion(self, listbox, context, x, y, timestamp):
+        """Highlight rows that are valid drop targets."""
+        drop_row = listbox.get_row_at_y(y)
+        if drop_row and drop_row.get_name():
+            ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == drop_row.get_name()), None)
+            if ws and not ws.get("is_pinned"):
+                listbox.drag_highlight_row(drop_row)
+                return True
+        listbox.drag_unhighlight_row()
+        return False
+
+    def on_row_drag_data_get(self, widget, context, selection, info, timestamp):
+        """Set the drag data to the row's name (workspace ID). `widget` is the EventBox."""
+        row = widget.get_parent()
+        log.debug("Drag Data Get for row: %s", row.get_name())
+        selection.set_text(row.get_name(), -1)
+
+    def on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
+        """Handle the drop and reorder the workspaces. `widget` is the ListBox."""
+        dragged_ws_id = selection.get_text()
+        drop_row = widget.get_row_at_y(y)
+        log.debug("Drag Data Received. Dragged ID: %s", dragged_ws_id)
+
+        if not drop_row or not drop_row.get_name() or not dragged_ws_id:
+            log.debug("Drop failed: Invalid drop target or dragged ID.")
+            context.finish(False, False, timestamp)
+            return
+
+        drop_ws_id = drop_row.get_name()
+        all_workspaces = self.workspaces_data["workspaces"]
+        log.debug("Dropped onto row with ID: %s", drop_ws_id)
+
+        try:
+            dragged_ws = next(w for w in all_workspaces if w["id"] == dragged_ws_id)
+            if dragged_ws.get("is_pinned"):
+                log.debug("Drop failed: Dragged item is pinned.")
+                context.finish(False, False, timestamp)
+                return
+
+            unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
+            dragged_index_in_unpinned = unpinned_workspaces.index(dragged_ws)
+
+            drop_ws = next(w for w in all_workspaces if w["id"] == drop_ws_id)
+            if drop_ws.get("is_pinned"):
+                log.debug("Drop failed: Drop target is pinned.")
+                context.finish(False, False, timestamp)
+                return
+
+            drop_index_in_unpinned = unpinned_workspaces.index(drop_ws)
+
+            log.debug("Reordering unpinned list. From index %d to %d", dragged_index_in_unpinned, drop_index_in_unpinned)
+            moved_item = unpinned_workspaces.pop(dragged_index_in_unpinned)
+            unpinned_workspaces.insert(drop_index_in_unpinned, moved_item)
+
+            pinned_workspaces = [w for w in all_workspaces if w.get("is_pinned")]
+            self.workspaces_data["workspaces"] = pinned_workspaces + unpinned_workspaces
+
+            self.save_workspaces()
+            self._build_workspace_list()
+            log.debug("Reorder successful.")
+            context.finish(True, False, timestamp)
+
+        except (StopIteration, ValueError) as e:
+            log.error("Error during reorder logic: %s", e)
+            context.finish(False, False, timestamp)
 
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
         workspace_id = row.get_name()
-        if not workspace_id:  # Ignore headers or separators
+        if not workspace_id:
             return
 
         log.info("Activating workspace %s", workspace_id)
@@ -269,25 +368,6 @@ class WorkspaceManager:
 
         self.workspaces_data["active_workspace"] = workspace_id
         self.save_workspaces()
-
-        # TODO: This logic needs to be fully implemented in guake_app.py
-        # For now, this is a conceptual implementation.
-        # 1. Tell guake_app to switch to the notebook associated with this workspace.
-        # self.guake_app.switch_to_notebook_for_workspace(workspace_id)
-
-        # 2. Focus the active terminal or create a new one.
-        active_terminal_id = ws.get("active_terminal")
-        if active_terminal_id:
-            log.debug("Focusing active terminal: %s", active_terminal_id)
-            # success = self.guake_app.focus_terminal_by_uuid(active_terminal_id)
-            # if not success:
-            #     self.guake_app.add_tab() # And update active_terminal
-        else:
-            log.debug("No active terminal, creating a new one.")
-            # new_term = self.guake_app.add_tab(return_terminal=True)
-            # if new_term:
-            #     ws["active_terminal"] = new_term.uuid
-            #     self.save_workspaces()
         listbox.select_row(row)
 
     def on_add_workspace(self, action, param):
@@ -314,7 +394,6 @@ class WorkspaceManager:
     def on_add_terminal_to_workspace(self, button, workspace_id):
         """Callback to add a new terminal tab to a specific workspace."""
         log.info("Adding new terminal to workspace %s", workspace_id)
-        # This needs to be coordinated with Guake's main logic
         self.guake_app.add_tab()
 
     def on_rename_workspace(self, menu_item, workspace_id):
@@ -334,17 +413,14 @@ class WorkspaceManager:
         grid = Gtk.Grid(column_spacing=10, row_spacing=10, margin=10)
         content_area.add(grid)
 
-        # Name entry
         name_label = Gtk.Label(label="Name:", xalign=0)
         name_entry = Gtk.Entry(text=ws["name"])
         name_entry.connect("activate", lambda _: dialog.response(Gtk.ResponseType.OK))
 
-        # Icon entry
         icon_label = Gtk.Label(label="Icon:", xalign=0)
         icon_entry = Gtk.Entry(text=ws.get("icon", ""))
-        icon_entry.set_max_length(2)  # For single emoji/character
+        icon_entry.set_max_length(2)
 
-        # Add red border style for validation
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b".error { border: 1px solid red; border-radius: 4px; }")
         name_entry.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
