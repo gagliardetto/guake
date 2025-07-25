@@ -320,6 +320,8 @@ class Guake(SimpleGladeApp):
         else:
             if not self.get_notebook().get_n_pages() > 0:
                 self.add_tab()
+        
+        self.update_active_workspace_indicator()
 
         if self.settings.general.get_boolean("use-popup"):
             key = self.settings.keybindingsGlobal.get_string("show-hide")
@@ -1124,6 +1126,14 @@ class Guake(SimpleGladeApp):
         else:
             notebook.set_current_page(page_to_focus_idx if page_to_focus_idx != -1 else first_visible_page_idx)
             self.set_terminal_focus()
+        
+        self.update_active_workspace_indicator()
+
+    def update_active_workspace_indicator(self):
+        if self.workspace_manager:
+            active_workspace = self.workspace_manager.get_active_workspace()
+            notebook = self.get_notebook()
+            notebook.update_workspace_indicator(active_workspace)
 
     def on_tab_closed(self, notebook, child, page_num):
         terminals_in_page = list(child.iter_terminals())

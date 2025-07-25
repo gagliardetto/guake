@@ -118,6 +118,19 @@ class TerminalNotebook(Gtk.Notebook):
         self.action_box.pack_start(self.tab_selection_button, 0, 0, 0)
         self.set_action_widget(self.action_box, Gtk.PackType.END)
 
+        self.workspace_indicator = Gtk.Label()
+        self.workspace_indicator.set_margin_start(10)
+        self.workspace_indicator.show()
+        self.set_action_widget(self.workspace_indicator, Gtk.PackType.START)
+
+    def update_workspace_indicator(self, workspace_data):
+        if workspace_data:
+            icon = workspace_data.get('icon', '')
+            name = workspace_data.get('name', '')
+            self.workspace_indicator.set_text(f"{icon} {name}")
+        else:
+            self.workspace_indicator.set_text("")
+
     def attach_guake(self, guake):
         self.guake = guake
 
