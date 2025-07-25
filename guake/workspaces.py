@@ -13,6 +13,8 @@ from datetime import datetime
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gio, Gdk, GLib
 
+from guake.utils import save_tabs_when_changed
+
 import logging
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,7 @@ class WorkspaceManager:
         self.workspaces_data = {}
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.widget.get_style_context().add_class("sidebar")
+        self.is_dropping = False
 
         self.load_workspaces()
         self._build_header()
@@ -263,7 +266,6 @@ class WorkspaceManager:
         self.scrolled_window.show_all()
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
-        self.is_dropping = False
 
     def create_workspace_row(self, ws_data, is_pinned):
         """Creates a Gtk.ListBoxRow for a single workspace."""
@@ -288,6 +290,7 @@ class WorkspaceManager:
         is_special = ws_data.get("is_special", False)
         if not is_pinned and not is_special:
             event_box.connect("drag-begin", self.on_row_drag_begin)
+            event_box.connect("drag-end", self.on_row_drag_end)
             event_box.connect("drag-data-get", self.on_row_drag_data_get)
             event_box.connect("drag-data-delete", self.on_row_drag_data_delete)
             event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
@@ -346,8 +349,13 @@ class WorkspaceManager:
 
     def on_row_drag_begin(self, widget, context):
         """Select the row when a drag operation begins. `widget` is the EventBox."""
+        self.is_dropping = False
         row = widget.get_parent()
         self.workspace_listbox.select_row(row)
+
+    def on_row_drag_end(self, widget, context):
+        """Reset the dropping flag when the drag operation ends."""
+        self.is_dropping = False
 
     def on_drag_motion(self, listbox, context, x, y, timestamp):
         """Highlight rows that are valid drop targets."""
@@ -385,20 +393,20 @@ class WorkspaceManager:
 
     def on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
         """Handle the drop and reorder the workspaces. `widget` is the ListBox."""
-        if self.is_dropping: return
+        if self.is_dropping: 
+            context.finish(False, False, timestamp)
+            return
         self.is_dropping = True
         
-        dragged_ws_id = selection.get_data().decode('utf-8')
-        drop_row = widget.get_row_at_y(y)
-        if not drop_row or not drop_row.get_name() or not dragged_ws_id:
-            context.finish(False, False, timestamp)
-            self.is_dropping = False
-            return
-
-        drop_ws_id = drop_row.get_name()
-        all_workspaces = self.workspaces_data["workspaces"]
-
         try:
+            dragged_ws_id = selection.get_data().decode('utf-8')
+            drop_row = widget.get_row_at_y(y)
+            if not drop_row or not drop_row.get_name() or not dragged_ws_id:
+                raise ValueError("Invalid drop target or dragged ID")
+
+            drop_ws_id = drop_row.get_name()
+            all_workspaces = self.workspaces_data["workspaces"]
+
             dragged_ws = next(w for w in all_workspaces if w["id"] == dragged_ws_id)
             if dragged_ws.get("is_pinned") or dragged_ws.get("is_special"):
                 raise ValueError("Cannot drag pinned or special workspaces")
@@ -425,9 +433,8 @@ class WorkspaceManager:
         except (StopIteration, ValueError) as e:
             log.error("Error during DnD reorder: %s", e)
             context.finish(False, False, timestamp)
-        finally:
-            self.is_dropping = False
 
+    @save_tabs_when_changed
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
         workspace_id = row.get_name()
@@ -513,6 +520,7 @@ class WorkspaceManager:
         active_id = self.workspaces_data.get("active_workspace")
         return self.get_workspace_by_id(active_id) if active_id else None
 
+    @save_tabs_when_changed
     def on_add_workspace(self, action, param, activate=False):
         """Adds a new workspace to the data and UI."""
         settings = self.workspaces_data["settings"]
@@ -534,6 +542,7 @@ class WorkspaceManager:
         """Callback to add a new terminal tab to a specific workspace."""
         self.guake_app.add_tab_to_workspace(workspace_id)
 
+    @save_tabs_when_changed
     def on_rename_workspace(self, menu_item, workspace_id):
         """Opens a dialog to rename the workspace and change its icon."""
         ws = self.get_workspace_by_id(workspace_id)
@@ -561,6 +570,7 @@ class WorkspaceManager:
             self._build_workspace_list()
         dialog.destroy()
 
+    @save_tabs_when_changed
     def on_delete_workspace(self, menu_item, workspace_id):
         """Opens a confirmation dialog to delete the workspace."""
         ws = self.get_workspace_by_id(workspace_id)
@@ -588,6 +598,7 @@ class WorkspaceManager:
             self._build_workspace_list()
         dialog.destroy()
 
+    @save_tabs_when_changed
     def on_pin_workspace(self, menu_item, workspace_id):
         """Toggles the pinned state of a workspace."""
         ws = self.get_workspace_by_id(workspace_id)
