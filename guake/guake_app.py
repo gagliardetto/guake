@@ -72,7 +72,6 @@ from guake.simplegladeapp import SimpleGladeApp
 from guake.theme import patch_gtk_theme
 from guake.theme import select_gtk_theme
 from guake.utils import BackgroundImageManager
-from guake.world_map import WorldMapView
 from guake.utils import FileManager
 from guake.utils import FullscreenManager
 from guake.utils import HidePrevention
@@ -80,6 +79,8 @@ from guake.utils import RectCalculator
 from guake.utils import TabNameUtils
 from guake.utils import get_server_time
 from guake.utils import save_tabs_when_changed
+from guake.world_map import WorldMapView
+from guake.workspaces import WorkspaceManager
 
 log = logging.getLogger(__name__)
 
@@ -137,6 +138,31 @@ class Guake(SimpleGladeApp):
 
         super().__init__(gladefile("guake.glade"))
 
+        # Add CSS provider for custom sidebar styling
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(
+            b"""
+        .sidebar {
+            background-color: #2E3436; /* Opaque dark color */
+        }
+        .sidebar GtkLabel, .sidebar .button {
+            color: #EEEEEC;
+        }
+        .sidebar .sidebar-title {
+            font-weight: bold;
+        }
+        .sidebar GtkListBoxRow:hover {
+            background-color: #555753;
+        }
+        .sidebar GtkListBoxRow:selected {
+            background-color: #4E9A06;
+        }
+        """
+        )
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         select_gtk_theme(self.settings)
         patch_gtk_theme(self.get_widget("window-root").get_style_context(), self.settings)
         self.add_callbacks(self)
@@ -177,7 +203,7 @@ class Guake(SimpleGladeApp):
             self.tray_icon.set_icon_full("guake-tray", _("Guake Terminal"))
             self.tray_icon.set_status(appindicator.IndicatorStatus.ACTIVE)
             menu = self.get_widget("tray-menu")
-            show = Gtk.MenuItem(_("Show"))
+            show = Gtk.MenuItem.new_with_label(_("Show"))
             show.set_sensitive(True)
             show.connect("activate", self.show_hide)
             show.show()
@@ -193,6 +219,16 @@ class Guake(SimpleGladeApp):
         self.mainframe = self.get_widget("mainframe")
         self.sidebar_revealer = self.get_widget("sidebar_revealer")
         self.sidebar_hide_timer = None
+
+        # Remove the dummy box from the glade file and add our workspace manager
+        old_sidebar_content = self.sidebar_revealer.get_child()
+        if old_sidebar_content:
+            self.sidebar_revealer.remove(old_sidebar_content)
+
+        self.workspace_manager = WorkspaceManager(self)
+        self.sidebar_revealer.add(self.workspace_manager.widget)
+        self.workspace_manager.widget.show_all()
+
         self.mainframe.remove(self.get_widget("notebook-teminals"))
 
         # Pending restore for terminal split after show-up
