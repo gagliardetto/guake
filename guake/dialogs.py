@@ -352,33 +352,42 @@ class QuickTabNavigationDialog(Gtk.Dialog):
             if self.visible_rows:
                 self.list_box.select_row(self.visible_rows[0])
                 self.list_box.grab_focus()
+        elif event.keyval == Gdk.KEY_Escape:
+            self.emit("close-view")
 
 class NewWorkspacePlaceholder(Gtk.Box):
     def __init__(self, guake_app, workspace_id):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.guake_app = guake_app
         self.workspace_id = workspace_id
 
-        self.set_halign(Gtk.Align.CENTER)
-        self.set_valign(Gtk.Align.CENTER)
+        self.set_vexpand(True)
+        self.set_hexpand(True)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content_box.set_halign(Gtk.Align.CENTER)
+        content_box.set_valign(Gtk.Align.CENTER)
         
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
-            .new-workspace-placeholder {
+            .new-workspace-placeholder-content {
                 background-color: rgba(0, 0, 0, 0.2);
                 border-radius: 8px;
-                padding: 20px;
+                padding: 40px;
             }
         """)
-        self.get_style_context().add_class("new-workspace-placeholder")
-        self.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        content_box.get_style_context().add_class("new-workspace-placeholder-content")
+        content_box.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         
-        label = Gtk.Label(label="This is a new workspace; what would you like to do next?")
-        self.pack_start(label, False, False, 10)
+        label = Gtk.Label(label="This is a new workspace.\nWhat would you like to do next?")
+        label.set_justify(Gtk.Justification.CENTER)
+        content_box.pack_start(label, False, False, 10)
 
         new_term_button = Gtk.Button.new_with_label("Create a new terminal")
         new_term_button.connect("clicked", self.on_create_terminal_clicked)
-        self.pack_start(new_term_button, False, False, 0)
+        content_box.pack_start(new_term_button, False, False, 0)
+
+        self.pack_start(content_box, True, True, 0)
 
     def on_create_terminal_clicked(self, widget):
         self.guake_app.add_tab_to_workspace(self.workspace_id)
