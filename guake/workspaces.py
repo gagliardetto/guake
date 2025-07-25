@@ -149,7 +149,6 @@ class WorkspaceManager:
 
         menu = Gio.Menu()
         menu.append("New Tab", "app.new_tab")
-        menu.append("Add Workspace", "app.add_workspace")
         menu.append_section(None, Gio.Menu())
         menu.append("Save Tabs", "app.save_tabs")
         menu.append("Restore Tabs", "app.restore_tabs")
@@ -163,7 +162,6 @@ class WorkspaceManager:
         app_action_group = Gio.SimpleActionGroup()
         actions = {
             "new_tab": self.guake_app.accel_add,
-            "add_workspace": self.on_add_workspace,
             "save_tabs": lambda a, p: self.guake_app.save_tabs(),
             "restore_tabs": lambda a, p: self.guake_app.restore_tabs(),
             "preferences": self.guake_app.show_prefs,
@@ -180,9 +178,13 @@ class WorkspaceManager:
         title.set_halign(Gtk.Align.CENTER)
         title.set_hexpand(True)
         title.get_style_context().add_class("sidebar-title")
+        
+        add_ws_button = Gtk.Button(image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON), relief=Gtk.ReliefStyle.NONE)
+        add_ws_button.connect("clicked", self.on_add_workspace)
 
         header_box.pack_start(menu_button, False, False, 0)
         header_box.pack_start(title, True, True, 0)
+        header_box.pack_end(add_ws_button, False, False, 0)
 
         self.widget.pack_start(header_box, False, False, 0)
         self.widget.pack_start(Gtk.Separator(), False, False, 0)
@@ -267,6 +269,31 @@ class WorkspaceManager:
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
 
+    def _create_workspace_context_menu(self, ws_data):
+        menu = Gtk.Menu()
+        rename_item = Gtk.MenuItem(label="Rename")
+        delete_item = Gtk.MenuItem(label="Delete")
+        pin_label = "Unpin" if ws_data.get("is_pinned") else "Pin"
+        pin_item = Gtk.MenuItem(label=pin_label)
+
+        rename_item.connect("activate", self.on_rename_workspace, ws_data["id"])
+        delete_item.connect("activate", self.on_delete_workspace, ws_data["id"])
+        pin_item.connect("activate", self.on_pin_workspace, ws_data["id"])
+
+        menu.append(rename_item)
+        menu.append(delete_item)
+        menu.append(pin_item)
+        menu.show_all()
+        return menu
+
+    def on_row_right_click(self, widget, event, ws_data):
+        if event.button == 3:
+            if not ws_data.get("is_special"):
+                menu = self._create_workspace_context_menu(ws_data)
+                menu.popup_at_pointer(event)
+                return True
+        return False
+
     def create_workspace_row(self, ws_data, is_pinned):
         """Creates a Gtk.ListBoxRow for a single workspace."""
         list_box_row = Gtk.ListBoxRow()
@@ -286,6 +313,7 @@ class WorkspaceManager:
         event_box.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
         event_box.connect("enter-notify-event", self.on_row_enter)
         event_box.connect("leave-notify-event", self.on_row_leave)
+        event_box.connect("button-press-event", self.on_row_right_click, ws_data)
 
         is_special = ws_data.get("is_special", False)
         if not is_pinned and not is_special:
@@ -294,12 +322,6 @@ class WorkspaceManager:
             event_box.connect("drag-data-get", self.on_row_drag_data_get)
             event_box.connect("drag-data-delete", self.on_row_drag_data_delete)
             event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
-
-        if not is_special:
-            add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
-            add_button = Gtk.Button(image=add_icon, relief=Gtk.ReliefStyle.NONE)
-            add_button.connect("clicked", self.on_add_terminal_to_workspace, ws_data["id"])
-            row_box.pack_start(add_button, False, False, 0)
 
         label_text = f"{ws_data.get('icon', '')} {ws_data['name']}"
         label = Gtk.Label(label=label_text, xalign=0)
@@ -318,20 +340,7 @@ class WorkspaceManager:
         if not is_special:
             ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
             ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
-            ws_menu = Gtk.Menu()
-            rename_item = Gtk.MenuItem(label="Rename")
-            delete_item = Gtk.MenuItem(label="Delete")
-            pin_label = "Unpin" if is_pinned else "Pin"
-            pin_item = Gtk.MenuItem(label=pin_label)
-
-            rename_item.connect("activate", self.on_rename_workspace, ws_data["id"])
-            delete_item.connect("activate", self.on_delete_workspace, ws_data["id"])
-            pin_item.connect("activate", self.on_pin_workspace, ws_data["id"])
-
-            ws_menu.append(rename_item)
-            ws_menu.append(delete_item)
-            ws_menu.append(pin_item)
-            ws_menu.show_all()
+            ws_menu = self._create_workspace_context_menu(ws_data)
             ws_menu_button.set_popup(ws_menu)
             row_box.pack_start(ws_menu_button, False, False, 0)
 
@@ -521,7 +530,7 @@ class WorkspaceManager:
         return self.get_workspace_by_id(active_id) if active_id else None
 
     @save_tabs_when_changed
-    def on_add_workspace(self, action, param, activate=False):
+    def on_add_workspace(self, widget=None, activate=False):
         """Adds a new workspace to the data and UI."""
         settings = self.workspaces_data["settings"]
         new_ws = {
