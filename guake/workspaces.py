@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 import shutil
 from datetime import datetime
+import subprocess
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gio, Gdk, GLib
@@ -50,10 +51,13 @@ class WorkspaceManager:
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.widget.get_style_context().add_class("sidebar")
         self.is_dropping = False
+        self._git_status_cache = {}
+        self._refresh_timer_id = None
 
         self.load_workspaces()
         self._build_header()
         self._build_workspace_list()
+        self._start_refresh_timer()
 
     def get_xdg_config_directory(self):
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "~/.config")
@@ -338,11 +342,11 @@ class WorkspaceManager:
             row_box.pack_start(pin_icon, False, False, 0)
 
         if not is_special:
-            ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
-            ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
-            ws_menu = self._create_workspace_context_menu(ws_data)
-            ws_menu_button.set_popup(ws_menu)
-            row_box.pack_start(ws_menu_button, False, False, 0)
+            status = self._git_status_cache.get(ws_data["id"], 'no-git')
+            icon_name, tooltip = self._get_git_icon_and_tooltip(status)
+            git_icon = Gtk.Image.new_from_icon_name(icon_name, Gtk.IconSize.MENU)
+            git_icon.set_tooltip_text(tooltip)
+            row_box.pack_end(git_icon, False, False, 0)
 
         return list_box_row
 
@@ -616,3 +620,77 @@ class WorkspaceManager:
             ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
             self.save_workspaces()
             self._build_workspace_list()
+
+    def _start_refresh_timer(self):
+        """Starts the periodic refresh timer if it's not already running."""
+        if self._refresh_timer_id is None:
+            log.info("Starting workspace git status refresh timer (15s).")
+            self._refresh_timer_id = GLib.timeout_add_seconds(15, self._timed_refresh)
+
+    def _stop_refresh_timer(self):
+        """Stops the periodic refresh timer if it is running."""
+        if self._refresh_timer_id is not None:
+            log.info("Stopping workspace git status refresh timer.")
+            GLib.source_remove(self._refresh_timer_id)
+            self._refresh_timer_id = None
+
+    def _timed_refresh(self):
+        """The callback for the GLib timer to periodically refresh data."""
+        log.debug("Timed workspace git status refresh triggered.")
+        self._update_git_status_cache()
+        self._build_workspace_list()
+        return True
+
+    def _update_git_status_cache(self):
+        """Updates the internal cache of workspace git statuses."""
+        log.debug("Updating workspace git status cache.")
+        for ws in self.get_all_workspaces():
+            if ws.get("is_special"):
+                continue
+            
+            statuses = set()
+            for term_uuid in ws.get("terminals", []):
+                terminal = self.guake_app.notebook_manager.get_terminal_by_uuid(uuid.UUID(term_uuid))
+                if terminal:
+                    try:
+                        cwd = terminal.get_current_directory()
+                        statuses.add(self._get_git_status(cwd))
+                    except Exception:
+                        statuses.add('no-git')
+            
+            if 'dirty' in statuses:
+                self._git_status_cache[ws['id']] = 'dirty'
+            elif 'untracked' in statuses:
+                self._git_status_cache[ws['id']] = 'untracked'
+            elif 'clean' in statuses:
+                self._git_status_cache[ws['id']] = 'clean'
+            else:
+                self._git_status_cache[ws['id']] = 'no-git'
+
+    def _get_git_status(self, directory):
+        """Checks git status, distinguishing between modified and untracked files."""
+        if not directory or not os.path.isdir(directory): return "no-git"
+        path = directory
+        try:
+            while path != os.path.dirname(path):
+                if os.path.isdir(os.path.join(path, '.git')):
+                    result = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True, check=False, cwd=path)
+                    if result.returncode != 0: return "no-git"
+                    output = result.stdout.strip()
+                    if not output: return "clean"
+                    has_modified = any(not line.startswith('??') for line in output.splitlines())
+                    has_untracked = any(line.startswith('??') for line in output.splitlines())
+                    if has_modified: return "dirty"
+                    if has_untracked: return "untracked"
+                    return "clean"
+                path = os.path.dirname(path)
+            return "no-git"
+        except (FileNotFoundError, Exception) as e:
+            log.warning(f"Could not get git status for {directory}: {e}")
+            return "no-git"
+
+    def _get_git_icon_and_tooltip(self, status):
+        if status == 'clean': return "emblem-ok-symbolic", "Git: Clean"
+        elif status == 'dirty': return "emblem-synchronizing-symbolic", "Git: Uncommitted changes"
+        elif status == 'untracked': return "document-new-symbolic", "Git: Untracked files"
+        else: return "emblem-important-symbolic", "Not a Git repository"
