@@ -7,6 +7,7 @@ import json
 import uuid
 from pathlib import Path
 import os
+import shutil
 from datetime import datetime
 
 gi.require_version("Gtk", "3.0")
@@ -53,14 +54,31 @@ class WorkspaceManager:
         return Path(xdg_config_home, "guake").expanduser()
 
     def load_workspaces(self):
-        """Loads workspace data from workspaces.json."""
+        """Loads workspace data from workspaces.json, with validation."""
         if self.config_path.exists():
             try:
                 with self.config_path.open("r", encoding="utf-8") as f:
-                    self.workspaces_data = json.load(f)
-                log.info("Workspaces loaded from %s", self.config_path)
+                    loaded_data = json.load(f)
+
+                # Validate that the loaded data is a dictionary with the expected key
+                if isinstance(loaded_data, dict) and "workspaces" in loaded_data:
+                    self.workspaces_data = loaded_data
+                    log.info("Workspaces loaded from %s", self.config_path)
+                else:
+                    log.warning("workspaces.json is malformed. A backup will be created and settings reset.")
+                    # Backup the malformed file before overwriting
+                    backup_path = self.config_path.with_name(f"{self.config_path.name}.bak")
+                    try:
+                        shutil.copy(self.config_path, backup_path)
+                        log.info("Malformed workspaces file backed up to %s", backup_path)
+                    except Exception as backup_error:
+                        log.error("Could not create backup of workspaces file: %s", backup_error)
+                    
+                    self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
+                    self.save_workspaces()
+
             except (json.JSONDecodeError, IOError) as e:
-                log.error("Failed to load workspaces file: %s", e)
+                log.error("Failed to load or parse workspaces file: %s. Using default config.", e)
                 self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
         else:
             log.info("No workspaces.json found, using default config.")
@@ -135,6 +153,7 @@ class WorkspaceManager:
         Builds the listbox that will contain the workspaces from the loaded data.
         """
         if hasattr(self, "scrolled_window"):
+            self.widget.remove(self.scrolled_window)
             self.scrolled_window.destroy()
 
         self.workspace_listbox = Gtk.ListBox()
