@@ -51,7 +51,7 @@ from guake import vte_version
 from guake.about import AboutDialog
 from guake.common import gladefile
 from guake.common import pixmapfile
-from guake.dialogs import PromptQuitDialog, QuickTabNavigationDialog
+from guake.dialogs import PromptQuitDialog, QuickTabNavigationDialog, NewWorkspacePlaceholder
 from guake.globals import MAX_TRANSPARENCY
 from guake.globals import NAME
 from guake.globals import PROMPT_ALWAYS
@@ -180,6 +180,7 @@ class Guake(SimpleGladeApp):
         self.is_restoring_session = False
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
+        self.new_workspace_placeholder = None
 
         # trayicon!
         img = pixmapfile("guake-tray.png")
@@ -717,6 +718,7 @@ class Guake(SimpleGladeApp):
         self.adding_tab_to_workspace_id = workspace_id
         self.add_tab()
         self.adding_tab_to_workspace_id = None
+        self.switch_to_workspace(workspace_id)
 
     def accel_add_home(self, *args):
         self.add_tab(os.environ["HOME"])
@@ -1106,30 +1108,45 @@ class Guake(SimpleGladeApp):
         workspace = self.workspace_manager.get_workspace_by_id(workspace_id)
         if not workspace: return
         
-        terminals_in_ws = workspace.get("terminals", [])
         notebook = self.get_notebook()
-        all_pages = [(i, notebook.get_nth_page(i)) for i in range(notebook.get_n_pages())]
-        page_map = {str(list(p.iter_terminals())[0].uuid): (i, p) for i, p in all_pages if list(p.iter_terminals())}
 
-        for _, page in all_pages: page.hide()
+        # If placeholder exists, remove it
+        if self.new_workspace_placeholder and self.new_workspace_placeholder.get_parent():
+            self.mainframe.remove(self.new_workspace_placeholder)
+            self.new_workspace_placeholder = None
 
-        first_visible_page_idx = -1
-        page_to_focus_idx = -1
-        
-        for term_uuid in terminals_in_ws:
-            if term_uuid in page_map:
-                idx, page = page_map[term_uuid]
-                page.show()
-                if first_visible_page_idx == -1: first_visible_page_idx = idx
-                if term_uuid == workspace.get("active_terminal"): page_to_focus_idx = idx
-        
-        if first_visible_page_idx == -1:
-            if workspace.get("is_special"): # Don't add tabs to special workspace automatically
-                return
-            self.add_tab()
+        # Ensure notebook is in the mainframe
+        if not notebook.get_parent():
+            self.mainframe.add(notebook)
+
+        terminals_in_ws = workspace.get("terminals", [])
+        if not terminals_in_ws and not workspace.get("is_special"):
+            # This is an empty, non-special workspace
+            notebook.hide()
+            self.new_workspace_placeholder = NewWorkspacePlaceholder(self, workspace_id)
+            self.mainframe.add(self.new_workspace_placeholder)
+            self.new_workspace_placeholder.show_all()
         else:
-            notebook.set_current_page(page_to_focus_idx if page_to_focus_idx != -1 else first_visible_page_idx)
-            self.set_terminal_focus()
+            # This is a workspace with terminals, or the special one
+            notebook.show()
+            all_pages = [(i, notebook.get_nth_page(i)) for i in range(notebook.get_n_pages())]
+            page_map = {str(list(p.iter_terminals())[0].uuid): (i, p) for i, p in all_pages if list(p.iter_terminals())}
+
+            for _, page in all_pages: page.hide()
+
+            first_visible_page_idx = -1
+            page_to_focus_idx = -1
+            
+            for term_uuid in terminals_in_ws:
+                if term_uuid in page_map:
+                    idx, page = page_map[term_uuid]
+                    page.show()
+                    if first_visible_page_idx == -1: first_visible_page_idx = idx
+                    if term_uuid == workspace.get("active_terminal"): page_to_focus_idx = idx
+            
+            if first_visible_page_idx != -1:
+                notebook.set_current_page(page_to_focus_idx if page_to_focus_idx != -1 else first_visible_page_idx)
+                self.set_terminal_focus()
         
         self.update_active_workspace_indicator()
 
