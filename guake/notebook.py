@@ -377,7 +377,7 @@ class TerminalNotebook(Gtk.Notebook):
             root_terminal_box, None, position if position is not None else -1
         )
         self.set_tab_reorderable(root_terminal_box, True)
-        self.show_all()  # needed to show newly added tabs and pages
+        root_terminal_box.show_all()
         # this is needed because self.window.show_all() results in showing every
         # thing which includes the scrollbar too
         self.guake.settings.general.triggerOnChangedValue(

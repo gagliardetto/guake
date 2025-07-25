@@ -30,6 +30,7 @@ DEFAULT_WORKSPACES_CONFIG = {
 }
 
 DND_TARGET = [Gtk.TargetEntry.new("GTK_LIST_BOX_ROW", Gtk.TargetFlags.SAME_APP, 0)]
+ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
 class WorkspaceManager:
@@ -88,11 +89,47 @@ class WorkspaceManager:
         """Saves current workspace data to workspaces.json."""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            data_to_save = self.workspaces_data.copy()
             with self.config_path.open("w", encoding="utf-8") as f:
-                json.dump(self.workspaces_data, f, indent=2)
+                json.dump(data_to_save, f, indent=2)
             log.info("Workspaces saved to %s", self.config_path)
         except IOError as e:
             log.error("Failed to save workspaces file: %s", e)
+
+    def reconcile_orphan_tabs(self, all_session_uuids=None):
+        """Finds tabs not assigned to any workspace and moves them to a special workspace."""
+        if all_session_uuids is None:
+            all_terminal_uuids = {str(t.uuid) for t in self.guake_app.get_notebook().iter_terminals()}
+        else:
+            all_terminal_uuids = all_session_uuids
+
+        assigned_regular_uuids = set()
+        for ws in self.workspaces_data.get("workspaces", []):
+            if ws.get('id') != ZERO_UUID:
+                assigned_regular_uuids.update(ws.get("terminals", []))
+
+        orphan_uuids = all_terminal_uuids - assigned_regular_uuids
+
+        zero_workspace = self.get_workspace_by_id(ZERO_UUID)
+        if not zero_workspace:
+            zero_workspace = {
+                "id": ZERO_UUID, "name": "No workspace", "terminals": [],
+                "icon": "❓", "is_pinned": False, "is_special": True,
+            }
+            self.workspaces_data.setdefault("workspaces", []).insert(0, zero_workspace)
+        
+        zero_workspace["terminals"] = list(orphan_uuids)
+        if orphan_uuids:
+            log.info("Found %d orphan tabs. Assigning to 'No workspace'.", len(orphan_uuids))
+
+        for ws in self.workspaces_data.get("workspaces", []):
+            if ws.get('id') != ZERO_UUID:
+                terminals = ws.get("terminals", [])
+                ws["terminals"] = [tid for tid in terminals if tid in all_terminal_uuids]
+
+        self.save_workspaces()
+        self._build_workspace_list()
+
 
     def _build_header(self):
         """
@@ -160,19 +197,33 @@ class WorkspaceManager:
         self.workspace_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.workspace_listbox.connect("row-activated", self.on_workspace_activated)
 
-        # Set the ListBox as the destination for DnD
         self.workspace_listbox.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
         self.workspace_listbox.connect("drag-motion", self.on_drag_motion)
         self.workspace_listbox.connect("drag-drop", self.on_drag_drop)
         self.workspace_listbox.connect("drag-data-received", self.on_drag_data_received)
 
         all_workspaces = self.workspaces_data.get("workspaces", [])
+        
+        no_workspace = self.get_workspace_by_id(ZERO_UUID)
+        if no_workspace and no_workspace.get("terminals"):
+            row = self.create_workspace_row(no_workspace, is_pinned=False)
+            self.workspace_listbox.add(row)
+            if any(w.get('id') != ZERO_UUID for w in all_workspaces):
+                separator_row = Gtk.ListBoxRow()
+                separator_row.set_selectable(False)
+                separator = Gtk.Separator()
+                separator.set_margin_top(5)
+                separator.set_margin_bottom(5)
+                separator_row.add(separator)
+                self.workspace_listbox.add(separator_row)
+
+        regular_workspaces = [w for w in all_workspaces if w.get("id") != ZERO_UUID]
         pinned_workspaces = sorted(
-            [w for w in all_workspaces if w.get("is_pinned")],
+            [w for w in regular_workspaces if w.get("is_pinned")],
             key=lambda w: w.get("updated_at", ""),
             reverse=True,
         )
-        unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
+        unpinned_workspaces = [w for w in regular_workspaces if not w.get("is_pinned")]
 
         if pinned_workspaces:
             pinned_header = Gtk.ListBoxRow()
@@ -212,7 +263,7 @@ class WorkspaceManager:
         self.scrolled_window.show_all()
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
-        self.is_dropping = False # Reset drop flag after rebuild
+        self.is_dropping = False
 
     def create_workspace_row(self, ws_data, is_pinned):
         """Creates a Gtk.ListBoxRow for a single workspace."""
@@ -221,7 +272,7 @@ class WorkspaceManager:
 
         event_box = Gtk.EventBox()
         list_box_row.add(event_box)
-        event_box.set_visible_window(False)  # CRITICAL FIX: Makes EventBox transparent for events
+        event_box.set_visible_window(False)
 
         row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row_box.set_margin_top(4)
@@ -230,50 +281,56 @@ class WorkspaceManager:
         row_box.set_margin_end(8)
         event_box.add(row_box)
 
-        # Enable pointer hand cursor on hover
         event_box.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
         event_box.connect("enter-notify-event", self.on_row_enter)
         event_box.connect("leave-notify-event", self.on_row_leave)
 
-        # Set the EventBox as the source for DnD if it's not pinned
-        if not is_pinned:
+        is_special = ws_data.get("is_special", False)
+        if not is_pinned and not is_special:
             event_box.connect("drag-begin", self.on_row_drag_begin)
             event_box.connect("drag-data-get", self.on_row_drag_data_get)
             event_box.connect("drag-data-delete", self.on_row_drag_data_delete)
             event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
 
-        add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
-        add_button = Gtk.Button(image=add_icon, relief=Gtk.ReliefStyle.NONE)
-        add_button.connect("clicked", self.on_add_terminal_to_workspace, ws_data["id"])
+        if not is_special:
+            add_icon = Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON)
+            add_button = Gtk.Button(image=add_icon, relief=Gtk.ReliefStyle.NONE)
+            add_button.connect("clicked", self.on_add_terminal_to_workspace, ws_data["id"])
+            row_box.pack_start(add_button, False, False, 0)
 
         label_text = f"{ws_data.get('icon', '')} {ws_data['name']}"
         label = Gtk.Label(label=label_text, xalign=0)
         label.set_hexpand(True)
-
-        ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
-        ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
-        ws_menu = Gtk.Menu()
-        rename_item = Gtk.MenuItem(label="Rename")
-        delete_item = Gtk.MenuItem(label="Delete")
-        pin_label = "Unpin" if is_pinned else "Pin"
-        pin_item = Gtk.MenuItem(label=pin_label)
-
-        rename_item.connect("activate", self.on_rename_workspace, ws_data["id"])
-        delete_item.connect("activate", self.on_delete_workspace, ws_data["id"])
-        pin_item.connect("activate", self.on_pin_workspace, ws_data["id"])
-
-        ws_menu.append(rename_item)
-        ws_menu.append(delete_item)
-        ws_menu.append(pin_item)
-        ws_menu.show_all()
-        ws_menu_button.set_popup(ws_menu)
-
-        row_box.pack_start(add_button, False, False, 0)
         row_box.pack_start(label, True, True, 0)
+
+        tab_count = len(ws_data.get("terminals", []))
+        count_label = Gtk.Label(label=str(tab_count))
+        count_label.get_style_context().add_class("dim-label")
+        row_box.pack_start(count_label, False, False, 0)
+
         if is_pinned:
             pin_icon = Gtk.Image.new_from_icon_name("pin-symbolic", Gtk.IconSize.MENU)
             row_box.pack_start(pin_icon, False, False, 0)
-        row_box.pack_start(ws_menu_button, False, False, 0)
+
+        if not is_special:
+            ws_menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
+            ws_menu_button = Gtk.MenuButton(image=ws_menu_icon, relief=Gtk.ReliefStyle.NONE)
+            ws_menu = Gtk.Menu()
+            rename_item = Gtk.MenuItem(label="Rename")
+            delete_item = Gtk.MenuItem(label="Delete")
+            pin_label = "Unpin" if is_pinned else "Pin"
+            pin_item = Gtk.MenuItem(label=pin_label)
+
+            rename_item.connect("activate", self.on_rename_workspace, ws_data["id"])
+            delete_item.connect("activate", self.on_delete_workspace, ws_data["id"])
+            pin_item.connect("activate", self.on_pin_workspace, ws_data["id"])
+
+            ws_menu.append(rename_item)
+            ws_menu.append(delete_item)
+            ws_menu.append(pin_item)
+            ws_menu.show_all()
+            ws_menu_button.set_popup(ws_menu)
+            row_box.pack_start(ws_menu_button, False, False, 0)
 
         return list_box_row
 
@@ -290,11 +347,6 @@ class WorkspaceManager:
     def on_row_drag_begin(self, widget, context):
         """Select the row when a drag operation begins. `widget` is the EventBox."""
         row = widget.get_parent()
-        unpinned_workspaces = [w for w in self.workspaces_data["workspaces"] if not w.get("is_pinned")]
-        dragged_ws = next((w for w in unpinned_workspaces if w["id"] == row.get_name()), None)
-        if dragged_ws:
-            start_pos = unpinned_workspaces.index(dragged_ws)
-            log.debug("Drag Begin on row: %s at start position: %d", row.get_name(), start_pos)
         self.workspace_listbox.select_row(row)
 
     def on_drag_motion(self, listbox, context, x, y, timestamp):
@@ -303,25 +355,17 @@ class WorkspaceManager:
         target_is_valid = False
         if drop_row and drop_row.get_name():
             ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == drop_row.get_name()), None)
-            if ws and not ws.get("is_pinned"):
+            if ws and not ws.get("is_pinned") and not ws.get("is_special"):
                 target_is_valid = True
-                unpinned_workspaces = [w for w in self.workspaces_data["workspaces"] if not w.get("is_pinned")]
-                hover_ws = next((w for w in unpinned_workspaces if w["id"] == drop_row.get_name()), None)
-                if hover_ws:
-                    hover_pos = unpinned_workspaces.index(hover_ws)
-                    log.debug("Drag Hover over potential new position: %d", hover_pos)
-
         if target_is_valid:
             listbox.drag_highlight_row(drop_row)
             Gdk.drag_status(context, Gdk.DragAction.MOVE, timestamp)
         else:
             listbox.drag_unhighlight_row()
-        
         return target_is_valid
 
     def on_drag_drop(self, listbox, context, x, y, timestamp):
         """Handles the drag-drop signal, returning True to allow the drop."""
-        log.debug("Drag Drop signal fired.")
         drop_row = listbox.get_row_at_y(y)
         if drop_row and drop_row.get_name():
             target_atom = Gdk.Atom.intern(DND_TARGET[0].target, False)
@@ -332,96 +376,62 @@ class WorkspaceManager:
     def on_row_drag_data_get(self, widget, context, selection, info, timestamp):
         """Set the drag data to the row's name (workspace ID). `widget` is the EventBox."""
         row = widget.get_parent()
-        log.debug("Drag Data Get for row: %s", row.get_name())
         target_atom = Gdk.Atom.intern(DND_TARGET[0].target, False)
         selection.set(target_atom, 8, row.get_name().encode('utf-8'))
 
     def on_row_drag_data_delete(self, widget, context):
         """Handle the deletion of the data from the source. `widget` is the EventBox."""
-        log.debug("Drag Data Delete for row: %s", widget.get_parent().get_name())
-        # The data is managed in our model, so we don't need to do anything here,
-        # but the signal must be handled for the MOVE action to be considered complete.
+        pass
 
     def on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
         """Handle the drop and reorder the workspaces. `widget` is the ListBox."""
-        if self.is_dropping:
-            log.debug("Ignoring redundant drop event.")
-            return
-
+        if self.is_dropping: return
         self.is_dropping = True
+        
         dragged_ws_id = selection.get_data().decode('utf-8')
         drop_row = widget.get_row_at_y(y)
-        log.debug("Drag Data Received. Dragged ID: %s", dragged_ws_id)
-
         if not drop_row or not drop_row.get_name() or not dragged_ws_id:
-            log.debug("Drop failed: Invalid drop target or dragged ID.")
             context.finish(False, False, timestamp)
             self.is_dropping = False
             return
 
         drop_ws_id = drop_row.get_name()
         all_workspaces = self.workspaces_data["workspaces"]
-        log.debug("Dropped onto row with ID: %s", drop_ws_id)
 
         try:
             dragged_ws = next(w for w in all_workspaces if w["id"] == dragged_ws_id)
-            if dragged_ws.get("is_pinned"):
-                log.debug("Drop failed: Dragged item is pinned.")
-                context.finish(False, False, timestamp)
-                self.is_dropping = False
-                return
+            if dragged_ws.get("is_pinned") or dragged_ws.get("is_special"):
+                raise ValueError("Cannot drag pinned or special workspaces")
 
-            unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
-            original_drag_index = unpinned_workspaces.index(dragged_ws)
-
+            unpinned = [w for w in all_workspaces if not w.get("is_pinned") and not w.get("is_special")]
+            drag_idx = unpinned.index(dragged_ws)
+            
             drop_ws = next(w for w in all_workspaces if w["id"] == drop_ws_id)
-            if drop_ws.get("is_pinned"):
-                log.debug("Drop failed: Drop target is pinned.")
-                context.finish(False, False, timestamp)
-                self.is_dropping = False
-                return
-
-            original_drop_index = unpinned_workspaces.index(drop_ws)
-            log.debug("Drop position index: %d", original_drop_index)
-
-            log.debug("Reordering unpinned list. From index %d to %d", original_drag_index, original_drop_index)
-            moved_item = unpinned_workspaces.pop(original_drag_index)
+            if drop_ws.get("is_pinned") or drop_ws.get("is_special"):
+                raise ValueError("Cannot drop onto pinned or special workspaces")
             
-            # The original drop index is correct if moving an item up the list.
-            # If moving down, the index needs to be adjusted because the list is now shorter.
-            new_drop_index = original_drop_index
-            if original_drag_index < original_drop_index:
-                new_drop_index = original_drop_index
+            drop_idx = unpinned.index(drop_ws)
+            
+            moved_item = unpinned.pop(drag_idx)
+            unpinned.insert(drop_idx, moved_item)
 
-            unpinned_workspaces.insert(new_drop_index, moved_item)
-
-            pinned_workspaces = [w for w in all_workspaces if w.get("is_pinned")]
-            self.workspaces_data["workspaces"] = pinned_workspaces + unpinned_workspaces
-            log.debug("Reordering of workspaces data complete.")
-
+            pinned = [w for w in all_workspaces if w.get("is_pinned")]
+            special = [w for w in all_workspaces if w.get("is_special")]
+            self.workspaces_data["workspaces"] = special + pinned + unpinned
+            
             self.save_workspaces()
-            
-            # Defer the UI rebuild to prevent conflicts with the DND operation
             GLib.idle_add(self._build_workspace_list)
-            
-            log.debug("Successful drop. Reordering and saving to workspaces.json complete.")
-            context.finish(True, True, timestamp) # IMPORTANT: Set del=True for MOVE action
-
+            context.finish(True, True, timestamp)
         except (StopIteration, ValueError) as e:
-            log.error("Error during reorder logic: %s", e)
+            log.error("Error during DnD reorder: %s", e)
             context.finish(False, False, timestamp)
+        finally:
             self.is_dropping = False
 
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
         workspace_id = row.get_name()
-        if not workspace_id:
-            return
-
-        log.info("Activating workspace %s", workspace_id)
-        ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
-        if not ws:
-            return
+        if not workspace_id: return
 
         self.workspaces_data["active_workspace"] = workspace_id
         self.save_workspaces()
@@ -430,10 +440,19 @@ class WorkspaceManager:
 
     def add_terminal_to_active_workspace(self, terminal_uuid):
         active_ws = self.get_active_workspace()
+        if not active_ws or active_ws.get("is_special"):
+            target_ws = next((w for w in self.get_all_workspaces() if not w.get("is_special")), None)
+            if not target_ws:
+                target_ws = self.on_add_workspace(None, None, activate=True)
+            else:
+                self.workspaces_data["active_workspace"] = target_ws["id"]
+            active_ws = target_ws
+
         if active_ws:
             active_ws.setdefault("terminals", []).append(terminal_uuid)
             active_ws["active_terminal"] = terminal_uuid
             self.save_workspaces()
+            self._build_workspace_list()
 
     def remove_terminal_from_active_workspace(self, terminal_uuid):
         active_ws = self.get_active_workspace()
@@ -442,12 +461,15 @@ class WorkspaceManager:
             idx = terminals.index(terminal_uuid)
             terminals.pop(idx)
 
-            if active_ws["active_terminal"] == terminal_uuid:
-                if not terminals:
-                    active_ws["active_terminal"] = None
-                else:
-                    new_idx = max(0, idx - 1)
-                    active_ws["active_terminal"] = terminals[new_idx]
+            if active_ws.get("active_terminal") == terminal_uuid:
+                active_ws["active_terminal"] = terminals[max(0, idx - 1)] if terminals else None
+            self.save_workspaces()
+            self._build_workspace_list()
+
+    def set_active_terminal_for_active_workspace(self, terminal_uuid):
+        active_ws = self.get_active_workspace()
+        if active_ws:
+            active_ws["active_terminal"] = terminal_uuid
             self.save_workspaces()
 
     def update_terminal_order_for_active_workspace(self, list_of_uuids):
@@ -464,15 +486,12 @@ class WorkspaceManager:
             terminals = source_ws["terminals"]
             idx = terminals.index(terminal_uuid)
             terminals.pop(idx)
-            if source_ws["active_terminal"] == terminal_uuid:
-                if not terminals:
-                    source_ws["active_terminal"] = None
-                else:
-                    new_idx = max(0, idx - 1)
-                    source_ws["active_terminal"] = terminals[new_idx]
+            if source_ws.get("active_terminal") == terminal_uuid:
+                source_ws["active_terminal"] = terminals[max(0, idx - 1)] if terminals else None
 
             target_ws.setdefault("terminals", []).append(terminal_uuid)
             self.save_workspaces()
+            self._build_workspace_list()
 
     def get_all_workspaces(self):
         return self.workspaces_data.get("workspaces", [])
@@ -482,133 +501,87 @@ class WorkspaceManager:
 
     def get_active_workspace(self):
         active_id = self.workspaces_data.get("active_workspace")
-        if not active_id:
-            return None
-        return self.get_workspace_by_id(active_id)
+        return self.get_workspace_by_id(active_id) if active_id else None
 
-    def on_add_workspace(self, action, param):
+    def on_add_workspace(self, action, param, activate=False):
         """Adds a new workspace to the data and UI."""
-        log.info("Add workspace action triggered.")
         settings = self.workspaces_data["settings"]
         new_ws = {
-            "id": str(uuid.uuid4()),
-            "name": settings["default_workspace_name"],
-            "terminals": [],
-            "tags": {},
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
-            "icon": settings["default_workspace_icon"],
-            "color_bg": settings["default_workspace_color_bg"],
-            "color_fg": settings["default_workspace_color_fg"],
-            "is_pinned": False,
-            "active_terminal": None,
+            "id": str(uuid.uuid4()), "name": settings["default_workspace_name"], "terminals": [],
+            "tags": {}, "created_at": datetime.utcnow().isoformat() + "Z",
+            "updated_at": datetime.utcnow().isoformat() + "Z", "icon": settings["default_workspace_icon"],
+            "color_bg": settings["default_workspace_color_bg"], "color_fg": settings["default_workspace_color_fg"],
+            "is_pinned": False, "active_terminal": None,
         }
         self.workspaces_data["workspaces"].append(new_ws)
+        if activate:
+            self.workspaces_data["active_workspace"] = new_ws["id"]
         self.save_workspaces()
         self._build_workspace_list()
+        return new_ws
 
     def on_add_terminal_to_workspace(self, button, workspace_id):
         """Callback to add a new terminal tab to a specific workspace."""
-        log.info("Adding new terminal to workspace %s", workspace_id)
+        self.guake_app.switch_to_workspace(workspace_id)
         self.guake_app.add_tab()
 
     def on_rename_workspace(self, menu_item, workspace_id):
         """Opens a dialog to rename the workspace and change its icon."""
-        ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
-        if not ws:
-            return
+        ws = self.get_workspace_by_id(workspace_id)
+        if not ws: return
 
-        dialog = Gtk.Dialog(
-            title="Edit Workspace",
-            parent=self.guake_app.window,
-            flags=0,
-            buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK),
-        )
+        dialog = Gtk.Dialog(title="Edit Workspace", parent=self.guake_app.window, flags=0,
+                            buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK))
         dialog.set_default_size(350, 100)
-        content_area = dialog.get_content_area()
         grid = Gtk.Grid(column_spacing=10, row_spacing=10, margin=10)
-        content_area.add(grid)
+        dialog.get_content_area().add(grid)
 
-        name_label = Gtk.Label(label="Name:", xalign=0)
         name_entry = Gtk.Entry(text=ws["name"])
-        name_entry.connect("activate", lambda _: dialog.response(Gtk.ResponseType.OK))
-
-        icon_label = Gtk.Label(label="Icon:", xalign=0)
-        icon_entry = Gtk.Entry(text=ws.get("icon", ""))
-        icon_entry.set_max_length(2)
-
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b".error { border: 1px solid red; border-radius: 4px; }")
-        name_entry.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
-        name_entry.connect("changed", lambda entry: entry.get_style_context().remove_class("error"))
-
-        grid.attach(name_label, 0, 0, 1, 1)
+        icon_entry = Gtk.Entry(text=ws.get("icon", ""), max_length=2)
+        grid.attach(Gtk.Label(label="Name:", xalign=0), 0, 0, 1, 1)
         grid.attach(name_entry, 1, 0, 1, 1)
-        grid.attach(icon_label, 0, 1, 1, 1)
+        grid.attach(Gtk.Label(label="Icon:", xalign=0), 0, 1, 1, 1)
         grid.attach(icon_entry, 1, 1, 1, 1)
-
         dialog.show_all()
 
-        while True:
-            response = dialog.run()
-            if response == Gtk.ResponseType.OK:
-                name_text = name_entry.get_text().strip()
-                if not name_text:
-                    name_entry.get_style_context().add_class("error")
-                    continue
-                else:
-                    ws["name"] = name_text
-                    ws["icon"] = icon_entry.get_text()
-                    ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
-                    self.save_workspaces()
-                    self._build_workspace_list()
-                    break
-            else:
-                break
-
+        if dialog.run() == Gtk.ResponseType.OK:
+            ws["name"] = name_entry.get_text().strip() or ws["name"]
+            ws["icon"] = icon_entry.get_text()
+            ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            self.save_workspaces()
+            self._build_workspace_list()
         dialog.destroy()
 
     def on_delete_workspace(self, menu_item, workspace_id):
         """Opens a confirmation dialog to delete the workspace."""
-        ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
-        if not ws:
-            return
+        ws = self.get_workspace_by_id(workspace_id)
+        if not ws: return
 
-        dialog = Gtk.MessageDialog(
-            parent=self.guake_app.window,
-            flags=0,
-            message_type=Gtk.MessageType.WARNING,
-            buttons=Gtk.ButtonsType.YES_NO,
-            text=f"Are you sure you want to delete '{ws['name']}'?",
-        )
-        response = dialog.run()
-        if response == Gtk.ResponseType.YES:
+        dialog = Gtk.MessageDialog(parent=self.guake_app.window, flags=0, message_type=Gtk.MessageType.WARNING,
+                                   buttons=Gtk.ButtonsType.YES_NO, text=f"Are you sure you want to delete '{ws['name']}'?")
+        if dialog.run() == Gtk.ResponseType.YES:
             if self.workspaces_data["active_workspace"] == workspace_id:
                 self.workspaces_data["active_workspace"] = None
             
-            ws_to_delete = self.get_workspace_by_id(workspace_id)
-            if ws_to_delete and ws_to_delete.get("terminals"):
+            if ws.get("terminals"):
                 remaining_workspaces = [w for w in self.get_all_workspaces() if w["id"] != workspace_id]
                 if remaining_workspaces:
                     first_ws = remaining_workspaces[0]
-                    first_ws.setdefault("terminals", []).extend(ws_to_delete["terminals"])
+                    first_ws.setdefault("terminals", []).extend(ws["terminals"])
 
-            self.workspaces_data["workspaces"] = [
-                w for w in self.workspaces_data["workspaces"] if w["id"] != workspace_id
-            ]
+            self.workspaces_data["workspaces"] = [w for w in self.workspaces_data["workspaces"] if w["id"] != workspace_id]
+            
+            if not self.workspaces_data["active_workspace"] and self.workspaces_data["workspaces"]:
+                self.workspaces_data["active_workspace"] = self.workspaces_data["workspaces"][0]["id"]
+                self.guake_app.switch_to_workspace(self.workspaces_data["active_workspace"])
+
             self.save_workspaces()
             self._build_workspace_list()
-
-            if not self.workspaces_data["active_workspace"] and self.workspaces_data["workspaces"]:
-                new_active_id = self.workspaces_data["workspaces"][0]["id"]
-                self.workspaces_data["active_workspace"] = new_active_id
-                self.save_workspaces()
-                self.guake_app.switch_to_workspace(new_active_id)
         dialog.destroy()
 
     def on_pin_workspace(self, menu_item, workspace_id):
         """Toggles the pinned state of a workspace."""
-        ws = next((w for w in self.workspaces_data["workspaces"] if w["id"] == workspace_id), None)
+        ws = self.get_workspace_by_id(workspace_id)
         if ws:
             ws["is_pinned"] = not ws.get("is_pinned", False)
             ws["updated_at"] = datetime.utcnow().isoformat() + "Z"
