@@ -1,4 +1,5 @@
 import gi
+import re
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk
@@ -192,19 +193,26 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
 
 
 class MyListBoxRow(Gtk.ListBoxRow):
-    def __init__(self, tab_label, tab_cwd, page_index):
+    def __init__(self, tab_label, tab_cwd, page_index, workspace_id, workspace_name):
         super().__init__()
         self.page_index = page_index
+        self.workspace_id = workspace_id
+        self.workspace_name = workspace_name
 
         grid = Gtk.Grid()
         grid.set_column_spacing(10)
-        grid.set_margin_start(20)  # Adds 20 pixels of padding to the start of the grid
-        grid.set_margin_end(20)    # Adds 20 pixels of padding to the end of the grid
+        grid.set_margin_start(20)
+        grid.set_margin_end(20)
 
         label = Gtk.Label()
         label.set_markup(f"<span font_desc='Iosevka, Arial, Helvetica, sans-serif Bold 15'>{tab_label}</span>")
         label.set_xalign(0)
         label.set_hexpand(True)
+
+        ws_label = Gtk.Label()
+        ws_label.set_markup(f"<small>{workspace_name}</small>")
+        ws_label.set_xalign(0)
+        ws_label.set_hexpand(False)
 
         cwd = Gtk.Label()
         cwd.set_markup(f"<span font_desc='Iosevka Term, Arial, Helvetica, sans-serif 15'>{tab_cwd}</span>")
@@ -213,12 +221,13 @@ class MyListBoxRow(Gtk.ListBoxRow):
         cwd.set_ellipsize(Pango.EllipsizeMode.START)
 
         grid.attach(label, 0, 0, 1, 1)
-        grid.attach_next_to(cwd, label, Gtk.PositionType.RIGHT, 1, 1)
+        grid.attach_next_to(ws_label, label, Gtk.PositionType.RIGHT, 1, 1)
+        grid.attach_next_to(cwd, ws_label, Gtk.PositionType.RIGHT, 1, 1)
 
         self.add(grid)
 
 class QuickTabNavigationDialog(Gtk.Dialog):
-    def __init__(self, window, notebook_manager):
+    def __init__(self, window, notebook_manager, workspace_manager):
         super().__init__(
             _("Quick Tab Navigation"),
             window,
@@ -227,9 +236,11 @@ class QuickTabNavigationDialog(Gtk.Dialog):
              Gtk.STOCK_OK, Gtk.ResponseType.OK)
         )
 
+        self.notebook_manager = notebook_manager
+        self.workspace_manager = workspace_manager
         self.entry = Gtk.Entry()
         self.list_box = Gtk.ListBox()
-        self.selected_page = None
+        self.selected_item = None
 
         screen = Gdk.Screen.get_default()
         screen_width = screen.get_width()
@@ -237,20 +248,18 @@ class QuickTabNavigationDialog(Gtk.Dialog):
 
         four_fifths_width = screen_width // 5 * 4
         one_third_height = screen_height // 3
-        row_height = 30  # Assumed height for each row
+        row_height = 30
 
         min_height = one_third_height + row_height
 
-        # Set minimum width of the dialog to one-third of the screen width
         self.set_default_size(four_fifths_width, -1)
 
-        # Create a scrolled window
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled_window.add(self.list_box)
         scrolled_window.set_min_content_height(min_height)
 
-        self.entry.set_placeholder_text("Search or filter tabs...")
+        self.entry.set_placeholder_text("Search or filter tabs (w:workspace)...")
         self.entry.set_hexpand(True)
 
         box = self.get_content_area()
@@ -263,82 +272,85 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.list_box.connect("row-selected", self.on_row_selected)
         self.list_box.connect("row-activated", self.on_row_activated)
 
-        page_index = 0
-
-        # Populate list_box
-        for notebook in notebook_manager.iter_notebooks():
-            for terminal in notebook.iter_terminals():
-                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
-                tab_cwd = terminal.get_current_directory() 
-
-                row = MyListBoxRow(tab_label, tab_cwd, page_index)
-                self.list_box.add(row)
-
-                page_index += 1
-
+        self.populate_list()
         self.show_all()
         self.visible_rows = []
         self.update_visible_rows()
 
+    def populate_list(self):
+        term_to_ws = {}
+        for ws in self.workspace_manager.get_all_workspaces():
+            for term_uuid in ws.get("terminals", []):
+                term_to_ws[term_uuid] = ws
+
+        page_index = 0
+        for notebook in self.notebook_manager.iter_notebooks():
+            for terminal in notebook.iter_terminals():
+                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
+                tab_cwd = terminal.get_current_directory()
+                
+                ws = term_to_ws.get(str(terminal.uuid))
+                ws_name = ws['name'] if ws else "Unknown"
+                ws_id = ws['id'] if ws else None
+
+                row = MyListBoxRow(tab_label, tab_cwd, page_index, ws_id, ws_name)
+                self.list_box.add(row)
+                page_index += 1
 
     def on_entry_changed(self, widget):
-        filter_text = widget.get_text().lower()
+        full_filter_text = widget.get_text().lower()
+        
+        ws_filter_match = re.search(r'w:(\S*)', full_filter_text)
+        ws_filter = ws_filter_match.group(1) if ws_filter_match else None
+        
+        text_filter = re.sub(r'w:\S*\s*', '', full_filter_text).strip()
+
         for row in self.list_box.get_children():
             hbox = row.get_child()
-            label, cwd = hbox.get_children()
+            label, ws_label, cwd = hbox.get_children()
             label_text = label.get_text().lower()
             cwd_text = cwd.get_text().lower()
+            ws_text = row.workspace_name.lower()
 
-            if filter_text in label_text or filter_text in cwd_text:
+            ws_match = not ws_filter or ws_filter in ws_text
+            text_match = not text_filter or text_filter in label_text or text_filter in cwd_text
+
+            if ws_match and text_match:
                 row.show()
             else:
                 row.hide()
         self.update_visible_rows()
 
-
     def update_visible_rows(self):
         self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
         
     def on_key_press_on_row(self, widget, event):
-        filter_text = self.entry.get_text()
         selected_row = self.list_box.get_selected_row()
         if event.keyval == Gdk.KEY_Return:
-            self.selected_page = self.get_selected_page()
-            self.response(Gtk.ResponseType.OK)
+            self.on_row_activated(self.list_box, selected_row)
         elif event.keyval == Gdk.KEY_Up:
             if selected_row and self.visible_rows and selected_row == self.visible_rows[0]:
                 self.list_box.unselect_row(selected_row)
                 self.entry.grab_focus()
                 self.entry.set_position(-1)
-        elif event.keyval == Gdk.KEY_Down:
-            if not filter_text and self.visible_rows:  # Filter box empty
-                if selected_row == self.visible_rows[-1]:
-                    return  # Prevent going past the last item
-                self.list_box.select_row(self.visible_rows[0])
-            elif filter_text and not self.visible_rows:  # No matches for filter
-                self.entry.grab_focus()
-                self.entry.set_position(-1)
-
-    def get_selected_page(self):
-        selected_row = self.list_box.get_selected_row()
-        if selected_row:
-            page_num = selected_row.page_index
-        return None
 
     def on_row_selected(self, listbox, row):
         if row:
-            self.selected_page = row.page_index
+            self.selected_item = {'page_index': row.page_index, 'workspace_id': row.workspace_id}
     
-    def get_selected_page(self):
-        return self.selected_page
+    def get_selection(self):
+        return self.selected_item
 
     def on_row_activated(self, listbox, row):
-        self.selected_page = row.page_index
+        self.selected_item = {'page_index': row.page_index, 'workspace_id': row.workspace_id}
         self.response(Gtk.ResponseType.OK)
 
     def on_entry_key_press(self, widget, event):
         if event.keyval == Gdk.KEY_Return:
             if len(self.visible_rows) == 1:
                 self.list_box.select_row(self.visible_rows[0])
-                self.selected_page = self.visible_rows[0].page_index
-                self.response(Gtk.ResponseType.OK)
+                self.on_row_activated(self.list_box, self.visible_rows[0])
+        elif event.keyval == Gdk.KEY_Down:
+            if self.visible_rows:
+                self.list_box.select_row(self.visible_rows[0])
+                self.list_box.grab_focus()

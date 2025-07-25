@@ -51,8 +51,7 @@ from guake import vte_version
 from guake.about import AboutDialog
 from guake.common import gladefile
 from guake.common import pixmapfile
-from guake.dialogs import PromptQuitDialog
-from guake.dialogs import QuickTabNavigationDialog
+from guake.dialogs import PromptQuitDialog, QuickTabNavigationDialog
 from guake.globals import MAX_TRANSPARENCY
 from guake.globals import NAME
 from guake.globals import PROMPT_ALWAYS
@@ -769,9 +768,14 @@ class Guake(SimpleGladeApp):
 
     def accel_quick_tab_navigation(self, *args):
         HidePrevention(self.window).prevent()
-        dialog = QuickTabNavigationDialog(self.window, self.notebook_manager)
-        if dialog.run() == Gtk.ResponseType.OK and dialog.get_selected_page() is not None:
-            self.get_notebook().set_current_page(dialog.get_selected_page())
+        dialog = QuickTabNavigationDialog(self.window, self.notebook_manager, self.workspace_manager)
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            selection = dialog.get_selection()
+            if selection:
+                self.workspace_manager.workspaces_data["active_workspace"] = selection['workspace_id']
+                self.switch_to_workspace(selection['workspace_id'])
+                self.get_notebook().set_current_page(selection['page_index'])
         dialog.destroy()
         HidePrevention(self.window).allow()
         return True
