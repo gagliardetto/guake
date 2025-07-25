@@ -173,6 +173,7 @@ class Guake(SimpleGladeApp):
 
         self.hidden = True
         self.forceHide = False
+        self.mouse_in_hot_edge = False
 
         # trayicon! Using SVG handles better different OS trays
         # img = pixmapfile('guake-tray.svg')
@@ -219,6 +220,12 @@ class Guake(SimpleGladeApp):
         self.mainframe = self.get_widget("mainframe")
         self.sidebar_revealer = self.get_widget("sidebar_revealer")
         self.sidebar_hide_timer = None
+
+        # Set sidebar width
+        sidebar_width_fraction = self.settings.general.get_int("sidebar-width-fraction")
+        screen_width = self.window.get_screen().get_width()
+        self.sidebar_revealer.get_child().set_size_request(screen_width / sidebar_width_fraction, -1)
+
 
         # Remove the dummy box from the glade file and add our workspace manager
         old_sidebar_content = self.sidebar_revealer.get_child()
