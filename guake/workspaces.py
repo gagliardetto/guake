@@ -46,6 +46,7 @@ class WorkspaceManager:
         self.workspaces_data = {}
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.widget.get_style_context().add_class("sidebar")
+        self.is_dropping = False  # Flag to prevent double drop events
 
         self.load_workspaces()
         self._build_header()
@@ -212,6 +213,7 @@ class WorkspaceManager:
         self.scrolled_window.show_all()
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
+        self.is_dropping = False # Reset drop flag after rebuild
 
     def create_workspace_row(self, ws_data, is_pinned):
         """Creates a Gtk.ListBoxRow for a single workspace."""
@@ -343,6 +345,11 @@ class WorkspaceManager:
 
     def on_drag_data_received(self, widget, context, x, y, selection, info, timestamp):
         """Handle the drop and reorder the workspaces. `widget` is the ListBox."""
+        if self.is_dropping:
+            log.debug("Ignoring redundant drop event.")
+            return
+
+        self.is_dropping = True
         dragged_ws_id = selection.get_data().decode('utf-8')
         drop_row = widget.get_row_at_y(y)
         log.debug("Drag Data Received. Dragged ID: %s", dragged_ws_id)
@@ -350,6 +357,7 @@ class WorkspaceManager:
         if not drop_row or not drop_row.get_name() or not dragged_ws_id:
             log.debug("Drop failed: Invalid drop target or dragged ID.")
             context.finish(False, False, timestamp)
+            self.is_dropping = False
             return
 
         drop_ws_id = drop_row.get_name()
@@ -361,6 +369,7 @@ class WorkspaceManager:
             if dragged_ws.get("is_pinned"):
                 log.debug("Drop failed: Dragged item is pinned.")
                 context.finish(False, False, timestamp)
+                self.is_dropping = False
                 return
 
             unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
@@ -370,6 +379,7 @@ class WorkspaceManager:
             if drop_ws.get("is_pinned"):
                 log.debug("Drop failed: Drop target is pinned.")
                 context.finish(False, False, timestamp)
+                self.is_dropping = False
                 return
 
             original_drop_index = unpinned_workspaces.index(drop_ws)
@@ -380,14 +390,9 @@ class WorkspaceManager:
             
             # The original drop index is correct if moving an item up the list.
             # If moving down, the index needs to be adjusted because the list is now shorter.
-            log.debug("original_drag_index: %d, original_drop_index: %d", original_drag_index, original_drop_index)
             new_drop_index = original_drop_index
             if original_drag_index < original_drop_index:
-                log.debug("Adjusting drop index for move down.")
                 new_drop_index = original_drop_index
-            if  original_drag_index > original_drop_index:
-                log.debug("Adjusting drop index for move up.")
-                new_drop_index = original_drop_index + 1
 
             unpinned_workspaces.insert(new_drop_index, moved_item)
 
@@ -406,6 +411,7 @@ class WorkspaceManager:
         except (StopIteration, ValueError) as e:
             log.error("Error during reorder logic: %s", e)
             context.finish(False, False, timestamp)
+            self.is_dropping = False
 
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
