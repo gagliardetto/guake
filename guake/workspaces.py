@@ -364,7 +364,7 @@ class WorkspaceManager:
                 return
 
             unpinned_workspaces = [w for w in all_workspaces if not w.get("is_pinned")]
-            dragged_index_in_unpinned = unpinned_workspaces.index(dragged_ws)
+            original_drag_index = unpinned_workspaces.index(dragged_ws)
 
             drop_ws = next(w for w in all_workspaces if w["id"] == drop_ws_id)
             if drop_ws.get("is_pinned"):
@@ -372,12 +372,24 @@ class WorkspaceManager:
                 context.finish(False, False, timestamp)
                 return
 
-            drop_index_in_unpinned = unpinned_workspaces.index(drop_ws)
-            log.debug("Drop position index: %d", drop_index_in_unpinned)
+            original_drop_index = unpinned_workspaces.index(drop_ws)
+            log.debug("Drop position index: %d", original_drop_index)
 
-            log.debug("Reordering unpinned list. From index %d to %d", dragged_index_in_unpinned, drop_index_in_unpinned)
-            moved_item = unpinned_workspaces.pop(dragged_index_in_unpinned)
-            unpinned_workspaces.insert(drop_index_in_unpinned, moved_item)
+            log.debug("Reordering unpinned list. From index %d to %d", original_drag_index, original_drop_index)
+            moved_item = unpinned_workspaces.pop(original_drag_index)
+            
+            # The original drop index is correct if moving an item up the list.
+            # If moving down, the index needs to be adjusted because the list is now shorter.
+            log.debug("original_drag_index: %d, original_drop_index: %d", original_drag_index, original_drop_index)
+            new_drop_index = original_drop_index
+            if original_drag_index < original_drop_index:
+                log.debug("Adjusting drop index for move down.")
+                new_drop_index = original_drop_index
+            if  original_drag_index > original_drop_index:
+                log.debug("Adjusting drop index for move up.")
+                new_drop_index = original_drop_index + 1
+
+            unpinned_workspaces.insert(new_drop_index, moved_item)
 
             pinned_workspaces = [w for w in all_workspaces if w.get("is_pinned")]
             self.workspaces_data["workspaces"] = pinned_workspaces + unpinned_workspaces
