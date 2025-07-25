@@ -179,6 +179,8 @@ class Guake(SimpleGladeApp):
         self.forceHide = False
         self.mouse_in_hot_edge = False
         self.is_restoring_session = False
+        self.adding_tab_to_workspace_id = None
+        self.sidebar_last_opened_time = 0.0
 
         # trayicon!
         img = pixmapfile("guake-tray.png")
@@ -701,8 +703,19 @@ class Guake(SimpleGladeApp):
         return True
 
     def accel_add(self, *args):
+        """Callback to add a new tab. Called by the accel key."""
         self.add_tab()
         return True
+
+    @save_tabs_when_changed
+    def add_tab(self, directory=None, open_tab_cwd=False):
+        position = 1 + self.get_notebook().get_current_page() if self.settings.general.get_boolean("new-tab-after") else None
+        self.get_notebook().new_page_with_focus(directory, position=position, open_tab_cwd=open_tab_cwd)
+
+    def add_tab_to_workspace(self, workspace_id):
+        self.adding_tab_to_workspace_id = workspace_id
+        self.add_tab()
+        self.adding_tab_to_workspace_id = None
 
     def accel_add_home(self, *args):
         self.add_tab(os.environ["HOME"])
@@ -734,6 +747,7 @@ class Guake(SimpleGladeApp):
             self.move_tab(pos, pos + 1)
         return True
 
+    @save_tabs_when_changed
     def move_tab(self, old_tab_pos, new_tab_pos):
         nb = self.get_notebook()
         nb.reorder_child(nb.get_nth_page(old_tab_pos), new_tab_pos)
@@ -790,10 +804,14 @@ class Guake(SimpleGladeApp):
                     self.sidebar_hide_timer = None
                 if not self.sidebar_revealer.get_reveal_child():
                     self.sidebar_revealer.set_reveal_child(True)
+                    self.sidebar_last_opened_time = pytime.time()
         elif event.x > sidebar_width + hot_edge_width:
             self.mouse_in_hot_edge = False
             if self.sidebar_revealer.get_reveal_child() and not self.sidebar_hide_timer:
-                self.sidebar_hide_timer = GLib.timeout_add(300, self.hide_sidebar_timeout)
+                time_since_open = pytime.time() - self.sidebar_last_opened_time
+                wait_for_min_open_time = max(0, 1.0 - time_since_open)
+                wait_from_now = max(0.3, wait_for_min_open_time)
+                self.sidebar_hide_timer = GLib.timeout_add(int(wait_from_now * 1000), self.hide_sidebar_timeout)
         elif event.x > hot_edge_width:
             self.mouse_in_hot_edge = False
 
@@ -891,12 +909,10 @@ class Guake(SimpleGladeApp):
         terminal.handler_ids.append(terminal.connect("window-title-changed", self.on_terminal_title_changed, terminal))
         terminal.directory = terminal.get_current_directory()
         if hasattr(self, 'workspace_manager') and self.workspace_manager and not self.is_restoring_session:
-            self.workspace_manager.add_terminal_to_active_workspace(str(terminal.uuid))
-
-    @save_tabs_when_changed
-    def add_tab(self, directory=None, open_tab_cwd=False):
-        position = 1 + self.get_notebook().get_current_page() if self.settings.general.get_boolean("new-tab-after") else None
-        self.get_notebook().new_page_with_focus(directory, position=position, open_tab_cwd=open_tab_cwd)
+            if self.adding_tab_to_workspace_id:
+                self.workspace_manager.add_terminal_to_workspace(str(terminal.uuid), self.adding_tab_to_workspace_id)
+            else:
+                self.workspace_manager.add_terminal_to_active_workspace(str(terminal.uuid))
 
     def find_tab(self, directory=None):
         HidePrevention(self.window).prevent()
@@ -1160,6 +1176,7 @@ class Guake(SimpleGladeApp):
             submenu.append(ws_item)
         submenu.show_all()
 
+    @save_tabs_when_changed
     def on_send_terminal_to_workspace(self, menu_item, terminal_uuid, target_workspace_id):
         log.debug("Sending terminal %s to workspace %s", terminal_uuid, target_workspace_id)
         self.workspace_manager.move_terminal_to_workspace(terminal_uuid, target_workspace_id)

@@ -464,6 +464,7 @@ class TerminalNotebook(Gtk.Notebook):
             terminal.grab_focus()
         return box, page_num, terminal
 
+    @save_tabs_when_changed
     def rename_page(self, page_index, new_text, user_set=False):
         """Rename an already added page by its index. Use user_set to define
         if the rename was triggered by the user (eg. rename dialog) or by

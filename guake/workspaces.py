@@ -438,6 +438,16 @@ class WorkspaceManager:
         listbox.select_row(row)
         self.guake_app.switch_to_workspace(workspace_id)
 
+    def add_terminal_to_workspace(self, terminal_uuid, workspace_id):
+        """Adds a terminal to a specific workspace and saves the state."""
+        ws = self.get_workspace_by_id(workspace_id)
+        if ws:
+            ws.setdefault("terminals", []).append(terminal_uuid)
+            ws["active_terminal"] = terminal_uuid
+            self.save_workspaces()
+            self.guake_app.save_tabs()
+            self._build_workspace_list()
+
     def add_terminal_to_active_workspace(self, terminal_uuid):
         active_ws = self.get_active_workspace()
         if not active_ws or active_ws.get("is_special"):
@@ -522,8 +532,7 @@ class WorkspaceManager:
 
     def on_add_terminal_to_workspace(self, button, workspace_id):
         """Callback to add a new terminal tab to a specific workspace."""
-        self.guake_app.switch_to_workspace(workspace_id)
-        self.guake_app.add_tab()
+        self.guake_app.add_tab_to_workspace(workspace_id)
 
     def on_rename_workspace(self, menu_item, workspace_id):
         """Opens a dialog to rename the workspace and change its icon."""
