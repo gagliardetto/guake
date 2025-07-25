@@ -46,7 +46,6 @@ class WorkspaceManager:
         self.workspaces_data = {}
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.widget.get_style_context().add_class("sidebar")
-        self.is_dropping = False  # Flag to prevent double drop events
 
         self.load_workspaces()
         self._build_header()
@@ -427,6 +426,65 @@ class WorkspaceManager:
         self.workspaces_data["active_workspace"] = workspace_id
         self.save_workspaces()
         listbox.select_row(row)
+        self.guake_app.switch_to_workspace(workspace_id)
+
+    def add_terminal_to_active_workspace(self, terminal_uuid):
+        active_ws = self.get_active_workspace()
+        if active_ws:
+            active_ws.setdefault("terminals", []).append(terminal_uuid)
+            active_ws["active_terminal"] = terminal_uuid
+            self.save_workspaces()
+
+    def remove_terminal_from_active_workspace(self, terminal_uuid):
+        active_ws = self.get_active_workspace()
+        if active_ws and terminal_uuid in active_ws.get("terminals", []):
+            terminals = active_ws["terminals"]
+            idx = terminals.index(terminal_uuid)
+            terminals.pop(idx)
+
+            if active_ws["active_terminal"] == terminal_uuid:
+                if not terminals:
+                    active_ws["active_terminal"] = None
+                else:
+                    new_idx = max(0, idx - 1)
+                    active_ws["active_terminal"] = terminals[new_idx]
+            self.save_workspaces()
+
+    def update_terminal_order_for_active_workspace(self, list_of_uuids):
+        active_ws = self.get_active_workspace()
+        if active_ws:
+            active_ws["terminals"] = list_of_uuids
+            self.save_workspaces()
+
+    def move_terminal_to_workspace(self, terminal_uuid, target_workspace_id):
+        source_ws = next((w for w in self.get_all_workspaces() if terminal_uuid in w.get("terminals", [])), None)
+        target_ws = self.get_workspace_by_id(target_workspace_id)
+
+        if source_ws and target_ws and source_ws != target_ws:
+            terminals = source_ws["terminals"]
+            idx = terminals.index(terminal_uuid)
+            terminals.pop(idx)
+            if source_ws["active_terminal"] == terminal_uuid:
+                if not terminals:
+                    source_ws["active_terminal"] = None
+                else:
+                    new_idx = max(0, idx - 1)
+                    source_ws["active_terminal"] = terminals[new_idx]
+
+            target_ws.setdefault("terminals", []).append(terminal_uuid)
+            self.save_workspaces()
+
+    def get_all_workspaces(self):
+        return self.workspaces_data.get("workspaces", [])
+
+    def get_workspace_by_id(self, workspace_id):
+        return next((w for w in self.get_all_workspaces() if w["id"] == workspace_id), None)
+
+    def get_active_workspace(self):
+        active_id = self.workspaces_data.get("active_workspace")
+        if not active_id:
+            return None
+        return self.get_workspace_by_id(active_id)
 
     def on_add_workspace(self, action, param):
         """Adds a new workspace to the data and UI."""
@@ -525,11 +583,27 @@ class WorkspaceManager:
         )
         response = dialog.run()
         if response == Gtk.ResponseType.YES:
+            if self.workspaces_data["active_workspace"] == workspace_id:
+                self.workspaces_data["active_workspace"] = None
+            
+            ws_to_delete = self.get_workspace_by_id(workspace_id)
+            if ws_to_delete and ws_to_delete.get("terminals"):
+                remaining_workspaces = [w for w in self.get_all_workspaces() if w["id"] != workspace_id]
+                if remaining_workspaces:
+                    first_ws = remaining_workspaces[0]
+                    first_ws.setdefault("terminals", []).extend(ws_to_delete["terminals"])
+
             self.workspaces_data["workspaces"] = [
                 w for w in self.workspaces_data["workspaces"] if w["id"] != workspace_id
             ]
             self.save_workspaces()
             self._build_workspace_list()
+
+            if not self.workspaces_data["active_workspace"] and self.workspaces_data["workspaces"]:
+                new_active_id = self.workspaces_data["workspaces"][0]["id"]
+                self.workspaces_data["active_workspace"] = new_active_id
+                self.save_workspaces()
+                self.guake_app.switch_to_workspace(new_active_id)
         dialog.destroy()
 
     def on_pin_workspace(self, menu_item, workspace_id):

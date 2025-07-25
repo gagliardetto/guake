@@ -224,8 +224,9 @@ class Guake(SimpleGladeApp):
         # Set sidebar width
         sidebar_width_fraction = self.settings.general.get_int("sidebar-width-fraction")
         screen_width = self.window.get_screen().get_width()
-        self.sidebar_revealer.get_child().set_size_request(screen_width / sidebar_width_fraction, -1)
-
+        sidebar_child = self.sidebar_revealer.get_child()
+        if sidebar_child:
+            sidebar_child.set_size_request(screen_width / sidebar_width_fraction, -1)
 
         # Remove the dummy box from the glade file and add our workspace manager
         old_sidebar_content = self.sidebar_revealer.get_child()
@@ -252,11 +253,11 @@ class Guake(SimpleGladeApp):
         # Start the file manager (only used by guake.yml so far).
         self.fm = FileManager()
 
-        # Workspace tracking
+        # Workspace tracking - NOTE: We are now managing tabs manually, not with NotebookManager's workspace feature
         self.notebook_manager = NotebookManager(
             self.window,
             self.mainframe,
-            self.settings.general.get_boolean("workspace-specific-tab-sets"),
+            False, # We set workspace-specific-tab-sets to False to manage tabs in one notebook
             self.terminal_spawned,
             self.page_deleted,
         )
@@ -331,9 +332,18 @@ class Guake(SimpleGladeApp):
         # Restore tabs when startup
         if self.settings.general.get_boolean("restore-tabs-startup"):
             self.restore_tabs(suppress_notify=True)
+        
+        # Activate the initial workspace
+        initial_workspace_id = self.workspace_manager.workspaces_data.get("active_workspace")
+        if initial_workspace_id:
+            self.switch_to_workspace(initial_workspace_id)
+        elif self.workspace_manager.get_all_workspaces():
+            # If no active workspace is set, activate the first one
+            first_ws_id = self.workspace_manager.get_all_workspaces()[0]["id"]
+            self.workspace_manager.workspaces_data["active_workspace"] = first_ws_id
+            self.workspace_manager.save_workspaces()
+            self.switch_to_workspace(first_ws_id)
 
-        # Pop-up that shows that guake is working properly (if not
-        # unset in the preferences windows)
         if self.settings.general.get_boolean("use-popup"):
             key = self.settings.keybindingsGlobal.get_string("show-hide")
             keyval, mask = Gtk.accelerator_parse(key)
@@ -354,9 +364,11 @@ class Guake(SimpleGladeApp):
 
     def notebook_created(self, nm, notebook, key):
         notebook.attach_guake(self)
-
-        # Tracking when reorder page
         notebook.connect("page-reordered", self.on_page_reorder)
+        notebook.connect("page-removed", self.on_tab_closed)
+        # The right_click_menu is an attribute of the notebook, we can extend it
+        if hasattr(notebook, "right_click_menu"):
+            self.populate_tab_context_menu(notebook.right_click_menu)
 
     def update_visual(self, user_data=None):
         screen = self.window.get_screen()
@@ -529,16 +541,12 @@ class Guake(SimpleGladeApp):
         """
         if not self.get_notebook().has_page():
             self.add_tab()
-
-        if command[-1] != "\n":
+        if not command.endswith("\n"):
             command += "\n"
-
-        terminal = self.get_notebook().get_current_terminal()
-        terminal.feed_child(command)
+        self.get_notebook().get_current_terminal().feed_child(command)
 
     def execute_command_by_uuid(self, tab_uuid, command):
-        """Execute the `command' in the tab whose terminal has the `tab_uuid' uuid"""
-        if command[-1] != "\n":
+        if not command.endswith("\n"):
             command += "\n"
         try:
             tab_uuid = uuid.UUID(tab_uuid)
@@ -653,7 +661,6 @@ class Guake(SimpleGladeApp):
         should_refocus = self.settings.general.get_boolean("window-refocus")
         has_focus = self.window.get_window().get_state() & Gdk.WindowState.FOCUSED
         if should_refocus and not has_focus:
-            log.debug("Refocussing the terminal")
             server_time = get_server_time(self.window)
             self.window.get_window().focus(server_time)
             self.set_terminal_focus()
@@ -662,9 +669,7 @@ class Guake(SimpleGladeApp):
             self.hide()
 
     def get_visibility(self):
-        if self.hidden:
-            return 0
-        return 1
+        return 0 if self.hidden else 1
 
     def show_focus(self, *args):
         self.win_prepare()
@@ -703,27 +708,10 @@ class Guake(SimpleGladeApp):
             self.losefocus_time = 0
             return False
 
-        # limit rate at which the visibility can be toggled.
         if self.prev_showhide_time and event_time and (event_time - self.prev_showhide_time) < 65:
             return False
         self.prev_showhide_time = event_time
-
-        log.debug("")
-        log.debug("=" * 80)
-        log.debug("Window display")
-        if self.window:
-            cur_state = int(self.window.get_state())
-            is_sticky = bool(cur_state & GDK_WINDOW_STATE_STICKY)
-            is_withdrawn = bool(cur_state & GDK_WINDOW_STATE_WITHDRAWN)
-            is_above = bool(cur_state & GDK_WINDOW_STATE_ABOVE)
-            is_iconified = self.is_iconified()
-            log.debug("gtk.gdk.WindowState = %s", cur_state)
-            log.debug("GDK_WINDOW_STATE_STICKY? %s", is_sticky)
-            log.debug("GDK_WINDOW_STATE_WITHDRAWN? %s", is_withdrawn)
-            log.debug("GDK_WINDOW_STATE_ABOVE? %s", is_above)
-            log.debug("GDK_WINDOW_STATE_ICONIFIED? %s", is_iconified)
-            return True
-        return False
+        return True
 
     def restore_pending_terminal_split(self):
         # Restore pending terminal split
@@ -796,11 +784,10 @@ class Guake(SimpleGladeApp):
 
         # This is here because vte color configuration works only after the
         # widget is shown.
-
         self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "color")
-        self.settings.styleBackground.triggerOnChangedValue(self.settings.styleBackground, "color")
-
-        log.debug("Current window position: %r", self.window.get_position())
+        self.settings.styleBackground.triggerOnChangedValue(
+            self.settings.styleBackground, "color"
+        )
         self.restore_pending_terminal_split()
         self.execute_hook("show")
 
@@ -844,107 +831,20 @@ class Guake(SimpleGladeApp):
             self.show()
 
     # -- configuration --
-
     def load_config(self, terminal_uuid=None):
-        """ "Just a proxy for all the configuration stuff."""
         user_data = {}
         if terminal_uuid:
             user_data["terminal_uuid"] = terminal_uuid
-
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "use-trayicon", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "prompt-on-quit", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "prompt-on-close-tab", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "window-tabbar", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "fullscreen-hide-tabbar", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "mouse-display", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "display-n", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "window-ontop", user_data=user_data
-        )
-        if not self.fullscreen_manager.is_fullscreen():
-            self.settings.general.triggerOnChangedValue(
-                self.settings.general, "window-height", user_data=user_data
+        for key in self.settings.general.list_keys():
+            self.settings.general.triggerOnChangedValue(self.settings.general, key, user_data)
+        for key in self.settings.style.list_keys():
+            self.settings.style.triggerOnChangedValue(self.settings.style, key, user_data)
+        for key in self.settings.styleFont.list_keys():
+            self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, key, user_data)
+        for key in self.settings.styleBackground.list_keys():
+            self.settings.styleBackground.triggerOnChangedValue(
+                self.settings.styleBackground, key, user_data
             )
-            self.settings.general.triggerOnChangedValue(
-                self.settings.general, "window-width", user_data=user_data
-            )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "use-scrollbar", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "history-size", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "infinite-history", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "use-vte-titles", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "set-window-title", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "display-tab-names", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "max-tab-name-length", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "quick-open-enable", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "quick-open-command-line", user_data=user_data
-        )
-        self.settings.style.triggerOnChangedValue(
-            self.settings.style, "cursor-shape", user_data=user_data
-        )
-        self.settings.styleFont.triggerOnChangedValue(
-            self.settings.styleFont, "style", user_data=user_data
-        )
-        self.settings.styleFont.triggerOnChangedValue(
-            self.settings.styleFont, "palette", user_data=user_data
-        )
-        self.settings.styleFont.triggerOnChangedValue(
-            self.settings.styleFont, "palette-name", user_data=user_data
-        )
-        self.settings.styleFont.triggerOnChangedValue(
-            self.settings.styleFont, "allow-bold", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(self.settings.general, "background-image-file")
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "background-image-layout-mode"
-        )
-        self.settings.style.triggerOnChangedValue(self.settings.style, "cursor-shape")
-        self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "style")
-        self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "palette")
-        self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "palette-name")
-        self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "allow-bold")
-        self.settings.styleBackground.triggerOnChangedValue(
-            self.settings.styleBackground, "transparency", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "use-default-font", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "compat-backspace", user_data=user_data
-        )
-        self.settings.general.triggerOnChangedValue(
-            self.settings.general, "compat-delete", user_data=user_data
-        )
 
     def accel_search_terminal(self, *args):
         nb = self.get_notebook()
@@ -992,8 +892,7 @@ class Guake(SimpleGladeApp):
         # TODO KEYBINDINGS ONLY
         """Callback to reset and clean the terminal"""
         HidePrevention(self.window).prevent()
-        current_term = self.get_notebook().get_current_terminal()
-        current_term.reset(True, True)
+        self.get_notebook().get_current_terminal().reset(True, True)
         HidePrevention(self.window).allow()
         return True
 
@@ -1103,8 +1002,6 @@ class Guake(SimpleGladeApp):
         self.get_notebook().set_current_page(new_tab_pos)
 
     def gen_accel_switch_tabN(self, N):
-        """Generates callback (which called by accel key) to go to the Nth tab."""
-
         def callback(*args):
             if 0 <= N < self.get_notebook().get_n_pages():
                 self.get_notebook().set_current_page(N)
@@ -1118,20 +1015,12 @@ class Guake(SimpleGladeApp):
         return True
 
     def accel_rename_current_tab(self, *args):
-        """Callback to show the rename tab dialog. Called by the accel
-        key.
-        """
         page_num = self.get_notebook().get_current_page()
         page = self.get_notebook().get_nth_page(page_num)
         self.get_notebook().get_tab_label(page).on_rename(None)
         return True
 
     def accel_quick_tab_navigation(self, *args):
-        """Callback to show the quick tab navigation dialog. Called by the accel
-        key.
-        """
-        # show the quick tab navigation dialog QuickTabNavigationDialog, where the user can type the
-        # filter string to select a tab by name or current directory
         HidePrevention(self.window).prevent()
         dialog = QuickTabNavigationDialog(self.get_notebook().guake.window, self.notebook_manager)
         r = dialog.run()
@@ -1141,11 +1030,8 @@ class Guake(SimpleGladeApp):
         dialog.destroy()
         HidePrevention(self.window).allow()
         return True
+
     def accel_copy_clipboard(self, *args):
-        # TODO KEYBINDINGS ONLY
-        """Callback to copy text in the shown terminal. Called by the
-        accel key.
-        """
         self.get_notebook().get_current_terminal().copy_clipboard()
         return True
 
@@ -1165,10 +1051,6 @@ class Guake(SimpleGladeApp):
         """Callback toggle whether the window should hide when it loses
         focus. Called by the accel key.
         """
-        if self.settings.general.get_boolean("window-losefocus"):
-            self.settings.general.set_boolean("window-losefocus", False)
-        else:
-            self.settings.general.set_boolean("window-losefocus", True)
         return True
 
     def accel_toggle_fullscreen(self, *args):
@@ -1178,26 +1060,30 @@ class Guake(SimpleGladeApp):
     def on_window_motion(self, widget, event):
         """Handles mouse motion to show/hide the sidebar."""
         sidebar_width = self.sidebar_revealer.get_allocated_width()
-        hot_edge_width = 1  # pixels to trigger the sidebar
+        hot_edge_width = 1
 
-        # If mouse is on the left edge, show the sidebar
         if event.x < hot_edge_width:
-            if self.sidebar_hide_timer:
-                GLib.source_remove(self.sidebar_hide_timer)
-                self.sidebar_hide_timer = None
-            if not self.sidebar_revealer.get_reveal_child():
-                self.sidebar_revealer.set_reveal_child(True)
-        # If the sidebar is revealed and the mouse moves away from it
-        elif self.sidebar_revealer.get_reveal_child() and event.x > sidebar_width:
-            if not self.sidebar_hide_timer:
-                # Hide after a short delay
+            if not self.mouse_in_hot_edge:
+                self.mouse_in_hot_edge = True
+                if self.sidebar_hide_timer:
+                    GLib.source_remove(self.sidebar_hide_timer)
+                    self.sidebar_hide_timer = None
+                if not self.sidebar_revealer.get_reveal_child():
+                    self.sidebar_revealer.set_reveal_child(True)
+        elif event.x > sidebar_width + hot_edge_width:
+            self.mouse_in_hot_edge = False
+            if self.sidebar_revealer.get_reveal_child() and not self.sidebar_hide_timer:
                 self.sidebar_hide_timer = GLib.timeout_add(300, self.hide_sidebar_timeout)
+        elif event.x > hot_edge_width:
+            self.mouse_in_hot_edge = False
+
 
     def hide_sidebar_timeout(self):
         """Callback for the timer to hide the sidebar."""
-        self.sidebar_revealer.set_reveal_child(False)
+        if not self.mouse_in_hot_edge:
+            self.sidebar_revealer.set_reveal_child(False)
         self.sidebar_hide_timer = None
-        return False  # Do not repeat the timer
+        return False
 
     def fullscreen(self):
         self.fullscreen_manager.fullscreen()
@@ -1225,25 +1111,16 @@ class Guake(SimpleGladeApp):
         # Read the content of .guake.yml in cwd
         if not self.settings.general.get_boolean("load-guake-yml"):
             return {}
-
         cwd = Path(vte.get_current_directory())
         filename = str(cwd.joinpath(".guake.yml"))
-
         try:
             content = self.fm.read_yaml(filename)
         except Exception:
-            log.debug("Unexpected error reading %s.", filename, exc_info=True)
             content = {}
-
-        if not isinstance(content, dict):
-            content = {}
-        return content
+        return content if isinstance(content, dict) else {}
 
     def compute_tab_title(self, vte):
-        """Compute the tab title"""
-
         guake_yml = self.load_cwd_guake_yaml(vte)
-
         if "title" in guake_yml:
             return guake_yml["title"]
 
@@ -1255,18 +1132,14 @@ class Guake(SimpleGladeApp):
                 parts = [s[:1] for s in parts[:-1]] + [parts[-1]]
                 vte_title = vte_title[: len(vte_title) - len(current_directory)] + "/".join(parts)
             if self.display_tab_names == 2:
-                vte_title = current_directory.split("/")[-1]
-                if not vte_title:
-                    vte_title = "(root)"
+                vte_title = current_directory.split("/")[-1] or "(root)"
         except OSError:
             pass
-
         return TabNameUtils.shorten(vte_title, self.settings)
 
     def check_if_terminal_directory_changed(self, term):
         @save_tabs_when_changed
         def terminal_directory_changed(self):
-            # Yep, just used for save tabs when changed
             pass
 
         current_directory = term.get_current_directory()
@@ -1281,22 +1154,18 @@ class Guake(SimpleGladeApp):
 
         # Check if terminal directory has changed
         self.check_if_terminal_directory_changed(term)
-
         box = term.get_parent().get_root_box()
-        use_vte_titles = self.settings.general.get_boolean("use-vte-titles")
-        if not use_vte_titles:
+        if not self.settings.general.get_boolean("use-vte-titles"):
             return
 
-        # NOTE: Try our best to find the page_num inside all notebooks
-        # this may return -1, should be checked ;)
         nb = self.get_notebook()
         page_num = nb.page_num(box)
-        for nb in self.notebook_manager.iter_notebooks():
-            page_num = nb.page_num(box)
+        for nb_iter in self.notebook_manager.iter_notebooks():
+            page_num = nb_iter.page_num(box)
             if page_num != -1:
+                nb = nb_iter
                 break
 
-        # if tab has been renamed by user, don't override.
         if not getattr(box, "custom_label_set", False):
             title = self.compute_tab_title(vte)
             nb.rename_page(page_num, title, False)
@@ -1307,7 +1176,7 @@ class Guake(SimpleGladeApp):
                 self.update_window_title(text)
 
     def update_window_title(self, title):
-        if self.settings.general.get_boolean("set-window-title") is True:
+        if self.settings.general.get_boolean("set-window-title"):
             self.window.set_title(title)
         else:
             self.window.set_title(self.default_window_title)
@@ -1347,13 +1216,15 @@ class Guake(SimpleGladeApp):
         terminal.handler_ids.append(
             terminal.connect("window-title-changed", self.on_terminal_title_changed, terminal)
         )
-
-        # Use to detect if directory has changed
         terminal.directory = terminal.get_current_directory()
+        if self.workspace_manager:
+            self.workspace_manager.add_terminal_to_active_workspace(str(terminal.uuid))
+            active_ws_id = self.workspace_manager.workspaces_data.get("active_workspace")
+            if active_ws_id:
+                self.switch_to_workspace(active_ws_id)
 
     @save_tabs_when_changed
     def add_tab(self, directory=None, open_tab_cwd=False):
-        """Adds a new tab to the terminal notebook."""
         position = None
         if self.settings.general.get_boolean("new-tab-after"):
             position = 1 + self.get_notebook().get_current_page()
@@ -1435,60 +1306,50 @@ class Guake(SimpleGladeApp):
 
     def open_link_under_terminal_cursor(self, *args):
         current_term = self.get_notebook().get_current_terminal()
-        if current_term is None:
-            return
-        url = current_term.get_link_under_terminal_cursor()
+        if current_term:
+            url = current_term.get_link_under_terminal_cursor()
+            current_term.browse_link_under_cursor(url)
         current_term.browse_link_under_cursor(url)
 
     def search_on_web(self, *args):
         """Search for the selected text on the web"""
         # TODO KEYBINDINGS ONLY
         current_term = self.get_notebook().get_current_terminal()
-
         if current_term.get_has_selection():
             current_term.copy_clipboard()
             guake_clipboard = Gtk.Clipboard.get_default(self.window.get_display())
-            search_query = guake_clipboard.wait_for_text()
-            search_query = quote_plus(search_query)
+            search_query = quote_plus(guake_clipboard.wait_for_text() or "")
             if search_query:
-                # TODO: search provider should be selectable.
                 search_url = f"https://www.google.com/search?q={search_query}&safe=off"
                 Gtk.show_uri(self.window.get_screen(), search_url, get_server_time(self.window))
         return True
 
     def set_tab_position(self, *args):
-        if self.settings.general.get_boolean("tab-ontop"):
-            self.get_notebook().set_tab_pos(Gtk.PositionType.TOP)
-        else:
-            self.get_notebook().set_tab_pos(Gtk.PositionType.BOTTOM)
+        pos = Gtk.PositionType.TOP if self.settings.general.get_boolean("tab-ontop") else Gtk.PositionType.BOTTOM
+        self.get_notebook().set_tab_pos(pos)
 
     def execute_hook(self, event_name):
-        """Execute shell commands related to current event_name"""
         hook = self.settings.hooks.get_string(f"{event_name}")
-        if hook is not None and hook != "":
-            hook = hook.split()
+        if hook:
             try:
-                with subprocess.Popen(hook):
+                with subprocess.Popen(hook.split()):
                     pass
-            except OSError as oserr:
-                if oserr.errno == 8:
-                    log.error(
-                        "Hook execution failed! Check shebang at first line of %s!",
-                        hook,
-                    )
-                    log.debug(traceback.format_exc())
-                else:
-                    log.error(str(oserr))
             except Exception as e:
                 log.error("hook execution failed! %s", e)
                 log.debug(traceback.format_exc())
-            else:
-                log.debug("hook on event %s has been executed", event_name)
 
     @save_tabs_when_changed
     def on_page_reorder(self, notebook, child, page_num):
-        # Yep, just used for save tabs when changed
-        pass
+        if self.workspace_manager:
+            visible_pages = [notebook.get_nth_page(i) for i in range(notebook.get_n_pages()) if notebook.get_nth_page(i).get_visible()]
+            
+            new_uuid_order = []
+            for page in visible_pages:
+                terminals = list(page.iter_terminals())
+                if terminals:
+                    new_uuid_order.append(str(terminals[0].uuid))
+
+            self.workspace_manager.update_terminal_order_for_active_workspace(new_uuid_order)
 
     def get_xdg_config_directory(self):
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "~/.config")
@@ -1517,170 +1378,167 @@ class Guake(SimpleGladeApp):
                         }
                     )
                 except FileNotFoundError:
-                    # discard same broken tabs
                     pass
-            # NOTE: Maybe we will have frame inside the workspace in future
-            #       So lets use list to store the tabs (as for each frame)
             config["workspace"][key] = [tabs]
-
-        if not self.get_xdg_config_directory().exists():
-            self.get_xdg_config_directory().mkdir(parents=True)
-        session_file = self.get_xdg_config_directory() / filename
+        config_dir = self.get_xdg_config_directory()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        session_file = config_dir / filename
         with session_file.open("w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=4)
-        log.info("Guake tabs saved to %s", session_file)
 
     def restore_tabs(self, filename="session.json", suppress_notify=False):
         session_file = self.get_xdg_config_directory() / filename
         if not session_file.exists():
-            log.info("Cannot find session.json file")
             return
-        with session_file.open(encoding="utf-8") as f:
-            try:
+        try:
+            with session_file.open(encoding="utf-8") as f:
                 config = json.load(f)
-            except Exception:
-                log.warning("%s is broken", session_file)
-                shutil.copy(
-                    session_file,
-                    self.get_xdg_config_directory() / f"{filename}.bak",
-                )
-                img_filename = pixmapfile("guake-notification.png")
-                notifier.showMessage(
-                    _("Guake Terminal"),
-                    _(
-                        "Your {session_filename} file is broken, backup to {session_filename}.bak"
-                    ).format(session_filename=filename),
-                    img_filename,
-                )
-                return
-
-        # Check schema_version exist
-        if "schema_version" not in config:
-            img_filename = pixmapfile("guake-notification.png")
-            notifier.showMessage(
-                _("Guake Terminal"),
-                _(
-                    "Tabs session restore abort.\n"
-                    "Your session file ({session_filename}) missing schema_version as key"
-                ).format(session_filename=session_file),
-                img_filename,
-            )
+        except Exception:
+            log.warning("%s is broken, creating backup.", session_file)
+            shutil.copy(session_file, f"{session_file}.bak")
             return
 
-        # Check schema version is not higher than current version
-        if config["schema_version"] > TABS_SESSION_SCHEMA_VERSION:
-            img_filename = pixmapfile("guake-notification.png")
-            notifier.showMessage(
-                _("Guake Terminal"),
-                _(
-                    "Tabs session restore abort.\n"
-                    "Your session file schema version is higher than current version "
-                    "({session_file_schema_version} > {current_schema_version})."
-                ).format(
-                    session_file_schema_version=config["schema_version"],
-                    current_schema_version=TABS_SESSION_SCHEMA_VERSION,
-                ),
-                img_filename,
-            )
+        if config.get("schema_version", 0) > TABS_SESSION_SCHEMA_VERSION:
+            log.warning("Session file version is too new. Aborting restore.")
             return
 
-        # Disable auto save tabs
         v = self.settings.general.get_boolean("save-tabs-when-changed")
         self.settings.general.set_boolean("save-tabs-when-changed", False)
 
-        # Restore all tabs for all workspaces
-        self.pending_restore_page_split = []
-        self._failed_restore_page_split = []
         try:
-            for key, frames in config["workspace"].items():
+            for key, frames in config.get("workspace", {}).items():
                 nb = self.notebook_manager.get_notebook(int(key))
-                current_pages = nb.get_n_pages()
-
-                # Restore each frames' tabs from config
-                # NOTE: If frame implement in future, we will need to update this code
+                for i in range(nb.get_n_pages()):
+                    nb.delete_page(0)
                 for tabs in frames:
-                    for index, tab in enumerate(tabs):
-                        if tab.get("panes", False):
-                            box, page_num, term = nb.new_page_with_focus(
+                    for tab in tabs:
+                        if tab.get("panes"):
+                            box, _, _ = nb.new_page_with_focus(
                                 label=tab["label"], user_set=tab["custom_label_set"], empty=True
                             )
                             box.restore_box_layout(box.child, tab["panes"])
                         else:
-                            directory = (
-                                tab["panes"][0]["directory"]
-                                if len(tab.get("panes", [])) == 1
-                                else tab.get("directory", None)
-                            )
-                            terminal_uuid = None
-                            if len(tab.get("panes", [])) == 1:
-                                terminal_uuid = tab["panes"][0].get("uuid")
                             nb.new_page_with_focus(
-                                directory,
-                                tab["label"],
-                                tab["custom_label_set"],
-                                terminal_uuid=terminal_uuid,
+                                tab.get("directory"),
+                                tab.get("label"),
+                                tab.get("custom_label_set"),
                             )
+        except (KeyError, IndexError, TypeError) as e:
+            log.warning("Failed to restore tabs: %s", e, exc_info=True)
 
-                    # Remove original pages in notebook
-                    for i in range(current_pages):
-                        nb.delete_page(0)
-        except KeyError:
-            log.warning("%s schema is broken", session_file)
-            shutil.copy(
-                session_file,
-                self.get_xdg_config_directory() / f"{filename}.bak",
-            )
-            with (self.get_xdg_config_directory() / f"{filename}.log.err").open(
-                "w", encoding="utf-8"
-            ) as f:
-                traceback.print_exc(file=f)
-            img_filename = pixmapfile("guake-notification.png")
-            notifier.showMessage(
-                _("Guake Terminal"),
-                _(
-                    "Your {session_filename} schema is broken, backup to {session_filename}.bak, "
-                    "and error message has been saved to {session_filename}.log.err.".format(
-                        session_filename=filename
-                    )
-                ),
-                img_filename,
-            )
-
-        # Reset auto save tabs
         self.settings.general.set_boolean("save-tabs-when-changed", v)
-
-        # Notify the user
         if self.settings.general.get_boolean("restore-tabs-notify") and not suppress_notify:
             filename = pixmapfile("guake-notification.png")
-            notifier.showMessage(_("Guake Terminal"), _("Your tabs has been restored!"), filename)
-
-        log.info("Guake tabs restored from %s", session_file)
+            notifier.showMessage(_("Guake Terminal"), _("Your tabs have been restored!"), filename)
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)
-    def accel_world_map_navigation(self, *args):
-        """Toggles the world map terminal organization view."""
-        log.debug("Toggling World Map View.")
-        current_notebook = self.notebook_manager.get_current_notebook()
 
+    def accel_world_map_navigation(self, *args):
+        current_notebook = self.notebook_manager.get_current_notebook()
         if self.world_map_visible:
-            # --- Hide Map and Show Terminals ---
-            # The map is currently visible, so we switch back to the notebook.
             self.mainframe.remove(self.world_map_view)
             self.mainframe.pack_start(current_notebook, True, True, 0)
             current_notebook.show()
             self.world_map_visible = False
-            self.set_terminal_focus()  # Return focus to the active terminal
+            self.set_terminal_focus()
         else:
-            # --- Hide Terminals and Show Map ---
-            # The notebook is visible, so we switch to the map.
-            # First, ensure the map is up-to-date with current terminals.
             self.world_map_view.refresh_view(force_data_update=False)
-
             self.mainframe.remove(current_notebook)
             self.mainframe.pack_start(self.world_map_view, True, True, 0)
             self.world_map_view.show()
             self.world_map_visible = True
             self.world_map_view.grab_focus()
-
         return True
+
+    def switch_to_workspace(self, workspace_id):
+        if not workspace_id or not self.workspace_manager:
+            return
+
+        log.debug("Switching to workspace %s", workspace_id)
+        workspace = self.workspace_manager.get_workspace_by_id(workspace_id)
+        if not workspace:
+            log.warning("Workspace %s not found.", workspace_id)
+            return
+        
+        terminals_in_ws = workspace.get("terminals", [])
+        notebook = self.get_notebook()
+        all_pages = [(i, notebook.get_nth_page(i)) for i in range(notebook.get_n_pages())]
+
+        first_visible_page_idx = -1
+        page_to_focus_idx = -1
+        visible_tab_count = 0
+
+        page_map = {str(list(page.iter_terminals())[0].uuid): (idx, page) for idx, page in all_pages if list(page.iter_terminals())}
+
+        for idx, page in all_pages:
+            page.hide()
+
+        for term_uuid in terminals_in_ws:
+            if term_uuid in page_map:
+                idx, page = page_map[term_uuid]
+                page.show()
+                visible_tab_count += 1
+                if first_visible_page_idx == -1:
+                    first_visible_page_idx = idx
+                if term_uuid == workspace.get("active_terminal"):
+                    page_to_focus_idx = idx
+        
+        if visible_tab_count == 0:
+            log.debug("Workspace has no tabs, creating one.")
+            self.add_tab()
+        else:
+            if page_to_focus_idx != -1:
+                log.debug("Focusing active terminal page: %d", page_to_focus_idx)
+                notebook.set_current_page(page_to_focus_idx)
+            elif first_visible_page_idx != -1:
+                log.debug("Focusing first visible page: %d", first_visible_page_idx)
+                notebook.set_current_page(first_visible_page_idx)
+        self.set_terminal_focus()
+
+    def on_tab_closed(self, notebook, child, page_num):
+        terminals_in_page = list(child.iter_terminals())
+        if terminals_in_page and self.workspace_manager:
+            for term in terminals_in_page:
+                self.workspace_manager.remove_terminal_from_active_workspace(str(term.uuid))
+            
+            active_ws = self.workspace_manager.get_active_workspace()
+            if active_ws:
+                self.switch_to_workspace(active_ws["id"])
+
+    def populate_tab_context_menu(self, menu):
+        send_to_menu_item = Gtk.MenuItem(label="Send to workspace")
+        menu.append(Gtk.SeparatorMenuItem())
+        menu.append(send_to_menu_item)
+        
+        submenu = Gtk.Menu()
+        send_to_menu_item.set_submenu(submenu)
+        
+        # This handler will dynamically populate the submenu when it's about to be shown
+        send_to_menu_item.connect("activate", self.on_populate_send_to_menu, submenu)
+            
+        menu.show_all()
+
+    def on_populate_send_to_menu(self, menu_item, submenu):
+        # Clear existing items
+        for child in submenu.get_children():
+            submenu.remove(child)
+            
+        current_terminal = self.get_notebook().get_current_terminal()
+        if not current_terminal:
+            return
+
+        workspaces = self.workspace_manager.get_all_workspaces()
+        for ws in workspaces:
+            ws_item = Gtk.MenuItem(label=f"{ws.get('icon', '')} {ws['name']}")
+            ws_item.connect("activate", self.on_send_terminal_to_workspace, str(current_terminal.uuid), ws["id"])
+            submenu.append(ws_item)
+        submenu.show_all()
+
+    def on_send_terminal_to_workspace(self, menu_item, terminal_uuid, target_workspace_id):
+        log.debug("Sending terminal %s to workspace %s", terminal_uuid, target_workspace_id)
+        self.workspace_manager.move_terminal_to_workspace(terminal_uuid, target_workspace_id)
+        
+        # Refresh the current view
+        active_ws_id = self.workspace_manager.workspaces_data.get("active_workspace")
+        self.switch_to_workspace(active_ws_id)
