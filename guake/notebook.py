@@ -67,6 +67,8 @@ class IndicatorStyle(Enum):
     MATRIX = 7
     PLASMA = 8
     ROTATING_SQUARE = 9
+    NEURAL_NETWORK = 10
+    VOXEL_GRID = 11
 
 class TabLabelWithIndicator(TabLabelEventBox):
     """A TabLabelEventBox that includes a blinking indicator for running processes."""
@@ -165,7 +167,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
             for drop in self.matrix_state:
                 drop[1] += 1
             self.matrix_state = [drop for drop in self.matrix_state if drop[1] < 10]
-        elif self.style in [IndicatorStyle.PLASMA, IndicatorStyle.ROTATING_SQUARE]:
+        elif self.style in [IndicatorStyle.PLASMA, IndicatorStyle.ROTATING_SQUARE, IndicatorStyle.NEURAL_NETWORK, IndicatorStyle.VOXEL_GRID]:
             self.animation_state = (self.animation_state + 0.02) % 1.0
 
         self.activity_indicator.queue_draw()
@@ -407,6 +409,56 @@ class TabLabelWithIndicator(TabLabelEventBox):
         cr.fill()
         cr.restore()
 
+    def _draw_neural_network(self, widget, cr):
+        """Draws a grid of nodes with pulsing connections."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+        
+        nodes = [(x*4+2, y*4+2) for x in range(4) for y in range(4)]
+        
+        for i, (x1, y1) in enumerate(nodes):
+            for x2, y2 in nodes[i+1:]:
+                dist = math.sqrt((x1-x2)**2 + (y1-y2)**2)
+                if dist < 6:
+                    alpha = (math.sin(self.animation_state * 2 * math.pi + dist) + 1) / 4
+                    cr.set_source_rgba(color.red, color.green, color.blue, alpha)
+                    cr.move_to(x1, y1)
+                    cr.line_to(x2, y2)
+                    cr.stroke()
+
+        for x, y in nodes:
+            alpha = (math.sin(self.animation_state * 2 * math.pi + x + y) + 1) / 2
+            cr.set_source_rgba(color.red, color.green, color.blue, alpha)
+            cr.arc(x, y, 1, 0, 2 * math.pi)
+            cr.fill()
+
+    def _draw_voxel_grid(self, widget, cr):
+        """Draws a 3D grid of cubes with a wave-like lighting effect."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+        
+        grid_size = 4
+        
+        for z in range(grid_size):
+            for y in range(grid_size):
+                for x in range(grid_size):
+                    # Project 3D coordinates to 2D
+                    px = (x - y) * 1.5 + width / 2
+                    py = (x + y) * 0.75 - z * 1.5 + height / 4
+
+                    # Lighting effect
+                    dist = math.sqrt((x-grid_size/2)**2 + (y-grid_size/2)**2 + (z-grid_size/2)**2)
+                    alpha = (math.sin(dist - self.animation_state * 4 * math.pi) + 1) / 2
+                    
+                    if alpha > 0.1:
+                        cr.set_source_rgba(color.red, color.green, color.blue, alpha)
+                        cr.rectangle(px, py, 2, 2)
+                        cr.fill()
+
     def on_draw_indicator(self, widget, cr):
         """Dispatches to the appropriate drawing function based on the selected style."""
         cr.save()
@@ -432,6 +484,10 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self._draw_plasma(widget, cr)
         elif self.style == IndicatorStyle.ROTATING_SQUARE:
             self._draw_rotating_square(widget, cr)
+        elif self.style == IndicatorStyle.NEURAL_NETWORK:
+            self._draw_neural_network(widget, cr)
+        elif self.style == IndicatorStyle.VOXEL_GRID:
+            self._draw_voxel_grid(widget, cr)
 
         return False
 

@@ -424,7 +424,7 @@
         </key>
         <key
             name="tab-process-status-animation" type="i">
-            <default>9</default>
+            <default>11</default>
             <summary>Tab process status animation</summary>
             <description>Controls the animation used for the tab process status.
                 NONE = 0
@@ -437,6 +437,8 @@
                 MATRIX = 7
                 PLASMA = 8
                 ROTATING_SQUARE = 9
+                NEURAL_NETWORK = 10
+                VOXEL_GRID = 11
             </description>
         </key>
     </schema>
