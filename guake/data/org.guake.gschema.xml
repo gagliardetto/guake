@@ -424,7 +424,7 @@
         </key>
         <key
             name="tab-process-status-animation" type="i">
-            <default>5</default>
+            <default>9</default>
             <summary>Tab process status animation</summary>
             <description>Controls the animation used for the tab process status.
                 NONE = 0

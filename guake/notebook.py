@@ -83,8 +83,9 @@ class TabLabelWithIndicator(TabLabelEventBox):
         if original_label:
             self.overlay.add(original_label)
 
-        # Configurable animation style, read from settings as requested
+        # Configurable animation style, read from settings and watch for changes
         self.style = IndicatorStyle(settings.general.get_int("tab-process-status-animation"))
+        settings.general.onChangedValue("tab-process-status-animation", self.on_style_changed)
 
         # Redesigned activity indicator
         self.activity_indicator = Gtk.DrawingArea()
@@ -99,16 +100,40 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.overlay.add_overlay(self.activity_indicator)
         self.overlay.set_overlay_pass_through(self.activity_indicator, True)
 
-        # Animation state for the new indicator design
+        # Animation state
         self.animation_state = 0.0
         self.animation_timer_id = None
         self.animation_direction = 1
         self.glitch_state = (0, 0, False)
-        self.firefly_state = (0, 0, 0) # x, y, alpha
+        self.firefly_state = (0, 0, 0)
         self.matrix_state = []
+        self.is_active = False
         
         self.show_all()
         self.activity_indicator.hide()
+
+    def on_style_changed(self, settings, key, user_data=None):
+        """Callback for when the animation style setting changes."""
+        try:
+            new_style_value = settings.get_int(key)
+            self.style = IndicatorStyle(new_style_value)
+        except ValueError:
+            log.warning("Invalid value for tab-process-status-animation: %s", new_style_value)
+            self.style = IndicatorStyle.NONE
+        self._update_animation_timer()
+
+    def _update_animation_timer(self):
+        """Starts or stops the animation timer based on activity and style."""
+        should_animate = self.is_active and self.style != IndicatorStyle.NONE
+        
+        if should_animate and self.animation_timer_id is None:
+            interval = 100 if self.style in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX] else 33
+            self.animation_timer_id = GObject.timeout_add(interval, self._animate_indicator)
+        elif not should_animate and self.animation_timer_id is not None:
+            GObject.source_remove(self.animation_timer_id)
+            self.animation_timer_id = None
+            self.animation_state = 0.0
+            self.activity_indicator.queue_draw()
 
     def _animate_indicator(self):
         """Callback to drive the indicator animation."""
@@ -413,15 +438,8 @@ class TabLabelWithIndicator(TabLabelEventBox):
     def set_activity(self, is_active):
         """Controls the visibility and animation of the activity indicator."""
         self.activity_indicator.set_visible(is_active)
-        if is_active and self.style != IndicatorStyle.NONE:
-            if self.animation_timer_id is None:
-                interval = 100 if self.style in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX] else 33
-                self.animation_timer_id = GObject.timeout_add(interval, self._animate_indicator)
-        else:
-            if self.animation_timer_id is not None:
-                GObject.source_remove(self.animation_timer_id)
-                self.animation_timer_id = None
-                self.animation_state = 0.0
+        self.is_active = is_active
+        self._update_animation_timer()
 
 
 class TerminalNotebook(Gtk.Notebook):
