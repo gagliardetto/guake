@@ -97,6 +97,8 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.firefly_state = (0, 0, 0)
         self.matrix_state = []
         self.is_active = False
+        self.warp_stars = []
+        self.constellation_stars = []
         
         self.show_all()
         self.activity_indicator.hide()
@@ -126,37 +128,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
 
     def _animate_indicator(self):
         """Callback to drive the indicator animation."""
-        if self.style == IndicatorStyle.SPINNER:
-            self.animation_state = (self.animation_state + 0.02) % 1.0
-        elif self.style == IndicatorStyle.RIPPLE:
-            self.animation_state = (self.animation_state + 0.04) % 1.0
-        elif self.style == IndicatorStyle.APERTURE:
-            self.animation_state += self.animation_direction * 0.02
-            if not (0.0 < self.animation_state < 1.0):
-                self.animation_direction *= -1
-                self.animation_state = max(0.0, min(1.0, self.animation_state))
-        elif self.style == IndicatorStyle.GLITCH:
-            self.glitch_state = (0, 0, False)
-            if random.random() < 0.1:
-                offset_x = random.randint(-2, 2)
-                offset_y = random.randint(-2, 2)
-                inverted = random.choice([True, False])
-                self.glitch_state = (offset_x, offset_y, inverted)
-        elif self.style == IndicatorStyle.CHROMA_WHEEL:
-            self.animation_state = (self.animation_state + 0.01) % 1.0
-        elif self.style == IndicatorStyle.FIREFLY:
-            self.animation_state = (self.animation_state + 0.02) % 1.0
-            if self.animation_state < 0.02: # Reset position at the start of a cycle
-                self.firefly_state = (random.uniform(0.2, 0.8), random.uniform(0.2, 0.8), 0)
-        elif self.style == IndicatorStyle.MATRIX:
-            if not self.matrix_state or random.random() < 0.3:
-                self.matrix_state.append([random.randint(0, 8), 0])
-            for drop in self.matrix_state:
-                drop[1] += 1
-            self.matrix_state = [drop for drop in self.matrix_state if drop[1] < 10]
-        elif self.style in [IndicatorStyle.PLASMA, IndicatorStyle.ROTATING_SQUARE, IndicatorStyle.NEURAL_NETWORK, IndicatorStyle.VOXEL_GRID]:
-            self.animation_state = (self.animation_state + 0.02) % 1.0
-
+        self.drawer.update_state(self)
         self.activity_indicator.queue_draw()
         return True
 
@@ -179,6 +151,8 @@ class TabLabelWithIndicator(TabLabelEventBox):
                 'glitch_state': self.glitch_state,
                 'firefly_state': self.firefly_state,
                 'matrix_state': self.matrix_state,
+                'warp_stars': self.warp_stars,
+                'constellation_stars': self.constellation_stars,
             }
             
             method(widget, cr, **state_kwargs)
