@@ -38,6 +38,8 @@ import gi
 import os
 import uuid
 import math
+import random
+import cairo
 from enum import Enum
 
 gi.require_version("Gtk", "3.0")
@@ -58,6 +60,13 @@ class IndicatorStyle(Enum):
     NONE = 0
     RIPPLE = 1
     SPINNER = 2
+    APERTURE = 3
+    GLITCH = 4
+    CHROMA_WHEEL = 5
+    FIREFLY = 6
+    MATRIX = 7
+    PLASMA = 8
+    ROTATING_SQUARE = 9
 
 class TabLabelWithIndicator(TabLabelEventBox):
     """A TabLabelEventBox that includes a blinking indicator for running processes."""
@@ -74,12 +83,12 @@ class TabLabelWithIndicator(TabLabelEventBox):
         if original_label:
             self.overlay.add(original_label)
 
-        # Configurable animation style
+        # Configurable animation style, read from settings as requested
         self.style = IndicatorStyle(settings.general.get_int("tab-process-status-animation"))
 
         # Redesigned activity indicator
         self.activity_indicator = Gtk.DrawingArea()
-        self.activity_indicator.set_size_request(14, 14)
+        self.activity_indicator.set_size_request(16, 16)
         self.activity_indicator.set_halign(Gtk.Align.END)
         self.activity_indicator.set_valign(Gtk.Align.START)
         self.activity_indicator.set_margin_top(2) 
@@ -93,6 +102,10 @@ class TabLabelWithIndicator(TabLabelEventBox):
         # Animation state for the new indicator design
         self.animation_state = 0.0
         self.animation_timer_id = None
+        self.animation_direction = 1
+        self.glitch_state = (0, 0, False)
+        self.firefly_state = (0, 0, 0) # x, y, alpha
+        self.matrix_state = []
         
         self.show_all()
         self.activity_indicator.hide()
@@ -103,9 +116,55 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self.animation_state = (self.animation_state + 0.02) % 1.0
         elif self.style == IndicatorStyle.RIPPLE:
             self.animation_state = (self.animation_state + 0.04) % 1.0
-        
+        elif self.style == IndicatorStyle.APERTURE:
+            self.animation_state += self.animation_direction * 0.02
+            if not (0.0 < self.animation_state < 1.0):
+                self.animation_direction *= -1
+                self.animation_state = max(0.0, min(1.0, self.animation_state))
+        elif self.style == IndicatorStyle.GLITCH:
+            self.glitch_state = (0, 0, False)
+            if random.random() < 0.1:
+                offset_x = random.randint(-2, 2)
+                offset_y = random.randint(-2, 2)
+                inverted = random.choice([True, False])
+                self.glitch_state = (offset_x, offset_y, inverted)
+        elif self.style == IndicatorStyle.CHROMA_WHEEL:
+            self.animation_state = (self.animation_state + 0.01) % 1.0
+        elif self.style == IndicatorStyle.FIREFLY:
+            self.animation_state = (self.animation_state + 0.02) % 1.0
+            if self.animation_state < 0.02: # Reset position at the start of a cycle
+                self.firefly_state = (random.uniform(0.2, 0.8), random.uniform(0.2, 0.8), 0)
+        elif self.style == IndicatorStyle.MATRIX:
+            if not self.matrix_state or random.random() < 0.3:
+                self.matrix_state.append([random.randint(0, 8), 0])
+            for drop in self.matrix_state:
+                drop[1] += 1
+            self.matrix_state = [drop for drop in self.matrix_state if drop[1] < 10]
+        elif self.style in [IndicatorStyle.PLASMA, IndicatorStyle.ROTATING_SQUARE]:
+            self.animation_state = (self.animation_state + 0.02) % 1.0
+
         self.activity_indicator.queue_draw()
         return True
+
+    def _hsl_to_rgb(self, h, s, l):
+        """Converts HSL color value to RGB. Assumes h, s, and l are in [0, 1]."""
+        if s == 0:
+            r = g = b = l
+        else:
+            def hue2rgb(p, q, t):
+                if t < 0: t += 1
+                if t > 1: t -= 1
+                if t < 1/6: return p + (q - p) * 6 * t
+                if t < 1/2: return q
+                if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+                return p
+
+            q = l * (1 + s) if l < 0.5 else l + s - l * s
+            p = 2 * l - q
+            r = hue2rgb(p, q, h + 1/3)
+            g = hue2rgb(p, q, h)
+            b = hue2rgb(p, q, h - 1/3)
+        return r, g, b
 
     def _draw_spinner(self, widget, cr):
         """Draws the 'orbital spinner' with two counter-rotating arcs."""
@@ -118,11 +177,6 @@ class TabLabelWithIndicator(TabLabelEventBox):
         cx = width / 2
         cy = height / 2
         radius = min(width, height) / 2 - 2
-
-        cr.save()
-        cr.set_operator(0)
-        cr.paint()
-        cr.restore()
         
         arc_length = math.pi * 0.8
 
@@ -166,13 +220,194 @@ class TabLabelWithIndicator(TabLabelEventBox):
         cr.arc(cx, cy, dot_radius, 0, 2 * math.pi)
         cr.fill()
 
+    def _draw_aperture(self, widget, cr):
+        """Draws a set of blades that form a closing and opening aperture."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+
+        cx = width / 2
+        cy = height / 2
+        outer_radius = min(width, height) / 2
+        num_blades = 6
+        
+        ease_state = (math.sin(self.animation_state * math.pi - math.pi/2) + 1) / 2
+        inner_radius = outer_radius * ease_state
+
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+
+        for i in range(num_blades):
+            angle = i * (2 * math.pi / num_blades)
+            
+            cr.save()
+            cr.translate(cx, cy)
+            cr.rotate(angle)
+
+            blade_angle = (2 * math.pi / num_blades) * 1.1 
+            cr.move_to(0, 0)
+            cr.line_to(outer_radius, 0)
+            cr.arc_negative(0, 0, outer_radius, 0, blade_angle)
+            cr.close_path()
+            cr.fill()
+            cr.restore()
+        
+        cr.save()
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.arc(cx, cy, inner_radius, 0, 2 * math.pi)
+        cr.fill()
+        cr.restore()
+
+    def _draw_glitch(self, widget, cr):
+        """Draws a square that randomly jumps and inverts its color."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+
+        size = min(width, height) / 2
+        offset_x, offset_y, is_inverted = self.glitch_state
+
+        x = (width - size) / 2 + offset_x
+        y = (height - size) / 2 + offset_y
+
+        if is_inverted:
+            cr.set_source_rgba(1.0 - color.red, 1.0 - color.green, 1.0 - color.blue, color.alpha)
+        else:
+            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+
+        cr.rectangle(x, y, size, size)
+        cr.fill()
+
+    def _draw_chroma_wheel(self, widget, cr):
+        """Draws a rotating, multi-colored wheel for a hypnotic effect."""
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        
+        cx = width / 2
+        cy = height / 2
+        radius = min(width, height) / 2
+        num_segments = 12
+
+        for i in range(num_segments):
+            hue = (i / num_segments + self.animation_state) % 1.0
+            
+            r, g, b = self._hsl_to_rgb(hue, 1.0, 0.5)
+            cr.set_source_rgb(r, g, b)
+            
+            start_angle = (i / num_segments) * 2 * math.pi
+            end_angle = ((i + 1) / num_segments) * 2 * math.pi
+
+            cr.move_to(cx, cy)
+            cr.arc(cx, cy, radius, start_angle, end_angle)
+            cr.close_path()
+            cr.fill()
+
+    def _draw_firefly(self, widget, cr):
+        """Draws a soft, pulsing light that appears at random locations."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+
+        x, y, _ = self.firefly_state
+        alpha = math.sin(self.animation_state * math.pi)
+
+        radgrad = cairo.RadialGradient(x * width, y * height, 0,
+                                       x * width, y * height, width / 2)
+        radgrad.add_color_stop_rgba(0, color.red, color.green, color.blue, alpha)
+        radgrad.add_color_stop_rgba(1, color.red, color.green, color.blue, 0)
+        
+        cr.set_source(radgrad)
+        cr.paint()
+
+    def _draw_matrix(self, widget, cr):
+        """Draws green characters 'raining' down the indicator area."""
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        
+        cr.set_source_rgb(0, 0.1, 0)
+        cr.paint()
+
+        cr.select_font_face("monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(4)
+        
+        for drop in self.matrix_state:
+            for i in range(10):
+                char = random.choice("abcdefghijklmnopqrstuvwxyz0123456789")
+                alpha = 1.0 - (i / 10.0)
+                cr.set_source_rgba(0.1, 1.0, 0.1, alpha)
+                cr.move_to(drop[0] * 2, (drop[1] - i) * 2)
+                cr.show_text(char)
+    
+    def _draw_plasma(self, widget, cr):
+        """Draws a classic 90s plasma effect."""
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        t = self.animation_state * 2 * math.pi
+
+        for y in range(height):
+            for x in range(width):
+                v = math.sin(x / 4.0 + t)
+                v += math.sin((y / 2.0 + t) / 2.0)
+                v += math.sin((x + y + t) / 2.0)
+                cx = x + 0.5 * math.sin(t / 5.0)
+                cy = y + 0.5 * math.cos(t / 3.0)
+                v += math.sin(math.sqrt(cx*cx + cy*cy) / 4.0 + t)
+                
+                color_val = (math.sin(v * math.pi) + 1) / 2
+                
+                hue = color_val
+                r, g, b = self._hsl_to_rgb(hue, 1.0, 0.5)
+                cr.set_source_rgb(r, g, b)
+                cr.rectangle(x, y, 1, 1)
+                cr.fill()
+
+    def _draw_rotating_square(self, widget, cr):
+        """Draws a rotating pixel-art style square."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+        
+        cx = width / 2
+        cy = height / 2
+        size = min(width, height) / 2
+
+        cr.save()
+        cr.translate(cx, cy)
+        cr.rotate(self.animation_state * math.pi / 2)
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+        cr.rectangle(-size/2, -size/2, size, size)
+        cr.fill()
+        cr.restore()
+
     def on_draw_indicator(self, widget, cr):
         """Dispatches to the appropriate drawing function based on the selected style."""
+        cr.save()
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.paint()
+        cr.restore()
+
         if self.style == IndicatorStyle.SPINNER:
             self._draw_spinner(widget, cr)
         elif self.style == IndicatorStyle.RIPPLE:
             self._draw_ripple(widget, cr)
-        
+        elif self.style == IndicatorStyle.APERTURE:
+            self._draw_aperture(widget, cr)
+        elif self.style == IndicatorStyle.GLITCH:
+            self._draw_glitch(widget, cr)
+        elif self.style == IndicatorStyle.CHROMA_WHEEL:
+            self._draw_chroma_wheel(widget, cr)
+        elif self.style == IndicatorStyle.FIREFLY:
+            self._draw_firefly(widget, cr)
+        elif self.style == IndicatorStyle.MATRIX:
+            self._draw_matrix(widget, cr)
+        elif self.style == IndicatorStyle.PLASMA:
+            self._draw_plasma(widget, cr)
+        elif self.style == IndicatorStyle.ROTATING_SQUARE:
+            self._draw_rotating_square(widget, cr)
+
         return False
 
     def set_activity(self, is_active):
@@ -180,7 +415,8 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.activity_indicator.set_visible(is_active)
         if is_active and self.style != IndicatorStyle.NONE:
             if self.animation_timer_id is None:
-                self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
+                interval = 100 if self.style in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX] else 33
+                self.animation_timer_id = GObject.timeout_add(interval, self._animate_indicator)
         else:
             if self.animation_timer_id is not None:
                 GObject.source_remove(self.animation_timer_id)
