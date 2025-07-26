@@ -478,7 +478,12 @@ class AnimationDrawer:
                     cr.stroke()
 
     def draw_guitar_string(self, widget, cr, animation_state=0.0, cpu_load=0.0, **_kwargs):
-        # Use the provided CSS color for the background
+        """
+        Draws a stylized, oscillating string. The wave's amplitude and complexity
+        increase with CPU load, providing a clear visual representation from calm
+        to agitated states.
+        """
+        # Set a dark background
         r = 0x1a / 255.0
         g = 0x1a / 255.0
         b = 0x1a / 255.0
@@ -490,48 +495,50 @@ class AnimationDrawer:
 
         t = animation_state * 2 * math.pi
         
-        # Non-linear scaling for CPU load. Emphasizes lower values.
-        normalized_cpu = min(cpu_load, 100.0) / 100.0
-        chaoticity = normalized_cpu ** 0.3
+        # Non-linear scaling for CPU load. This gives more sensitivity at lower loads.
+        load_factor = (min(cpu_load, 100.0) / 100.0) ** 0.4
 
+        # Create a colorful gradient that shifts over time
         gradient = cairo.LinearGradient(0, 0, width, 0)
         hue1 = animation_state % 1.0
         hue2 = (animation_state + 0.5) % 1.0
         r1, g1, b1 = self._hsl_to_rgb(hue1, 1.0, 0.6)
         r2, g2, b2 = self._hsl_to_rgb(hue2, 1.0, 0.6)
-        gradient.add_color_stop_rgba(0, r1, g1, b1, 0.8)
-        gradient.add_color_stop_rgba(1, r2, g2, b2, 0.8)
+        gradient.add_color_stop_rgba(0, r1, g1, b1, 0.9)
+        gradient.add_color_stop_rgba(1, r2, g2, b2, 0.9)
 
         cr.set_source(gradient)
-        cr.set_line_width(1.5)
+        # Use a thinner line for a more refined look
+        cr.set_line_width(1.0)
 
-        # Define a pool of oscillators
-        oscillators = [
-            {'amp': 3.5, 'freq': 3, 'phase': 1.0},
-            {'amp': 1.0, 'freq': 8, 'phase': 2.2},
-            {'amp': 0.7, 'freq': 6, 'phase': 0.7},
-            {'amp': 1.2, 'freq': 12, 'phase': 3.1},
-            {'amp': 0.5, 'freq': 15, 'phase': 1.5},
-        ]
+        # The amplitude now grows significantly with CPU load, creating higher peaks.
+        # It ranges from a calm (height / 5) to an agitated (height / 2) state.
+        dynamic_amplitude = (height / 5) * (1 + 1.5 * load_factor)
 
-        # Determine how many oscillators to use based on chaoticity
-        num_oscillators = 1 + int(chaoticity * (len(oscillators) - 1))
+        # A decay function that simulates a "pluck" at the start of the animation cycle.
+        decay = math.sin(animation_state * math.pi)
 
         cr.move_to(0, height / 2)
-        for x in range(width):
-            final_y = 0
-            for i in range(num_oscillators):
-                osc = oscillators[i]
-                # Modulate amplitude and frequency with chaoticity, but with a dampened effect
-                amp = osc['amp'] * (1 + chaoticity * 0.5)
-                freq = osc['freq'] * (1 + chaoticity * 0.25)
-                
-                y = amp * math.sin(x * math.pi / width * (freq + math.sin(t/2)) + t * osc['phase'])
-                final_y += y
+        for x in range(int(width)):
+            # Normalized x coordinate [0, 1]
+            nx = x / width
 
-            modulator = (math.sin(t / 2) + 1) / 2
-            decay = math.sin(animation_state * math.pi)
-            final_y *= modulator * decay
+            # A simple, calm base wave
+            y_calm = math.sin(nx * 2 * math.pi + t)
+
+            # More complex wave components for the "agitated" state.
+            # Frequencies are reduced to prevent blurring at high load.
+            y_agitated1 = math.sin(nx * 6 * math.pi + t * 1.5)
+            y_agitated2 = math.sin(nx * 10 * math.pi - t * 2.0)
+            
+            # Combine agitated components
+            y_agitated = (y_agitated1 * 0.6 + y_agitated2 * 0.4)
+
+            # Blend between the calm and agitated states based on CPU load
+            y = (1.0 - load_factor) * y_calm + load_factor * y_agitated
+
+            # Apply the dynamic amplitude and pluck decay effect
+            final_y = y * dynamic_amplitude * decay
             
             cr.line_to(x, final_y + height / 2)
 
