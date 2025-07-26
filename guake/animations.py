@@ -46,8 +46,35 @@ class IndicatorStyle(Enum):
     CONSTELLATION = 17
     GUITAR_STRING = 18
 
+class AnimationTarget(Enum):
+    """Specifies the intended drawing area for an animation."""
+    CORNER = 1
+    FULL_WIDTH = 2
+
 class AnimationDrawer:
     """A class to handle the drawing of all indicator animations."""
+
+    STYLE_TARGETS = {
+        IndicatorStyle.NONE: AnimationTarget.CORNER,
+        IndicatorStyle.RIPPLE: AnimationTarget.CORNER,
+        IndicatorStyle.SPINNER: AnimationTarget.CORNER,
+        IndicatorStyle.APERTURE: AnimationTarget.CORNER,
+        IndicatorStyle.GLITCH: AnimationTarget.CORNER,
+        IndicatorStyle.CHROMA_WHEEL: AnimationTarget.CORNER,
+        IndicatorStyle.FIREFLY: AnimationTarget.CORNER,
+        IndicatorStyle.MATRIX: AnimationTarget.CORNER,
+        IndicatorStyle.PLASMA: AnimationTarget.CORNER,
+        IndicatorStyle.ROTATING_SQUARE: AnimationTarget.CORNER,
+        IndicatorStyle.NEURAL_NETWORK: AnimationTarget.CORNER,
+        IndicatorStyle.VOXEL_GRID: AnimationTarget.CORNER,
+        IndicatorStyle.KALEIDOSCOPE: AnimationTarget.CORNER,
+        IndicatorStyle.FRACTAL_TREE: AnimationTarget.CORNER,
+        IndicatorStyle.AUDIO_VISUALIZER: AnimationTarget.CORNER,
+        IndicatorStyle.WARP_SPEED: AnimationTarget.CORNER,
+        IndicatorStyle.STARGATE: AnimationTarget.CORNER,
+        IndicatorStyle.CONSTELLATION: AnimationTarget.CORNER,
+        IndicatorStyle.GUITAR_STRING: AnimationTarget.FULL_WIDTH,
+    }
 
     def _hsl_to_rgb(self, h, s, l):
         """Converts HSL color value to RGB. Assumes h, s, and l are in [0, 1]."""
@@ -120,8 +147,10 @@ class AnimationDrawer:
                 star['y'] += star['dy']
                 if not (0 < star['x'] < indicator.activity_indicator.get_allocated_width()): star['dx'] *= -1
                 if not (0 < star['y'] < indicator.activity_indicator.get_allocated_height()): star['dy'] *= -1
+        elif style == IndicatorStyle.GUITAR_STRING:
+            indicator.animation_state = (indicator.animation_state + 0.01) % 1.0
         
-        if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX]:
+        if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX, IndicatorStyle.GUITAR_STRING]:
              indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
 
     def draw_spinner(self, widget, cr, animation_state=0.0, **_kwargs):
@@ -457,18 +486,23 @@ class AnimationDrawer:
         hue2 = (animation_state + 0.5) % 1.0
         r1, g1, b1 = self._hsl_to_rgb(hue1, 1.0, 0.6)
         r2, g2, b2 = self._hsl_to_rgb(hue2, 1.0, 0.6)
-        gradient.add_color_stop_rgb(0, r1, g1, b1)
-        gradient.add_color_stop_rgb(1, r2, g2, b2)
+        gradient.add_color_stop_rgba(0, r1, g1, b1, 0.7)
+        gradient.add_color_stop_rgba(1, r2, g2, b2, 0.7)
 
         cr.set_source(gradient)
         cr.set_line_width(1.5)
 
-        amplitude = 2.5
-        frequency = 2 * math.pi / width
-
-        cr.move_to(0, 0)
+        cr.move_to(0, height / 2)
         for x in range(width):
-            y = amplitude * math.sin(x * frequency * 2 + t) * math.sin(t)
-            cr.line_to(x, y + 3)
+            # Combine multiple sine waves for a more complex, organic vibration
+            y1 = 3.0 * math.sin(x * math.pi / width * 3 + t)
+            y2 = 0.8 * math.sin(x * math.pi / width * 10 + t * 2)
+            y3 = 0.5 * math.sin(x * math.pi / width * 5 + t * 0.5)
+            
+            modulator = (math.sin(t / 2) + 1) / 2
+            decay = math.sin(animation_state * math.pi)
+            final_y = (y1 + y2 + y3) * modulator * decay
+            
+            cr.line_to(x, final_y + height / 2)
 
         cr.stroke()

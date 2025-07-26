@@ -33,7 +33,7 @@ from guake.utils import HidePrevention
 from guake.utils import gdk_is_x11_display
 from guake.utils import get_process_name
 from guake.utils import save_tabs_when_changed
-from .animations import IndicatorStyle, AnimationDrawer
+from .animations import IndicatorStyle, AnimationDrawer, AnimationTarget
 
 import gi
 import os
@@ -76,7 +76,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         settings.general.onChangedValue("tab-process-status-animation", self.on_style_changed)
         self.drawer = AnimationDrawer()
 
-        # Redesigned activity indicator
+        # Small corner indicator
         self.activity_indicator = Gtk.DrawingArea()
         self.activity_indicator.set_size_request(16, 16)
         self.activity_indicator.set_halign(Gtk.Align.END)
@@ -85,9 +85,17 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.activity_indicator.set_margin_end(2)
         self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
         self.activity_indicator.connect("draw", self.on_draw_indicator)
-        
         self.overlay.add_overlay(self.activity_indicator)
         self.overlay.set_overlay_pass_through(self.activity_indicator, True)
+
+        # Full-width top border indicator
+        self.full_width_indicator = Gtk.DrawingArea()
+        self.full_width_indicator.set_halign(Gtk.Align.FILL)
+        self.full_width_indicator.set_valign(Gtk.Align.START)
+        self.full_width_indicator.set_size_request(-1, 4)
+        self.full_width_indicator.connect("draw", self.on_draw_indicator)
+        self.overlay.add_overlay(self.full_width_indicator)
+        self.overlay.set_overlay_pass_through(self.full_width_indicator, True)
 
         # Animation state
         self.animation_state = 0.0
@@ -101,7 +109,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.constellation_stars = []
         
         self.show_all()
-        self.activity_indicator.hide()
+        self._update_widget_visibility()
 
     def on_style_changed(self, settings, key, user_data=None):
         """Callback for when the animation style setting changes."""
@@ -111,7 +119,21 @@ class TabLabelWithIndicator(TabLabelEventBox):
         except ValueError:
             log.warning("Invalid value for tab-process-status-animation: %s", new_style_value)
             self.style = IndicatorStyle.NONE
+        self._update_widget_visibility()
         self._update_animation_timer()
+
+    def _get_current_indicator_widget(self):
+        target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
+        if target == AnimationTarget.FULL_WIDTH:
+            return self.full_width_indicator
+        return self.activity_indicator
+
+    def _update_widget_visibility(self):
+        target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
+        is_full_width = target == AnimationTarget.FULL_WIDTH
+
+        self.full_width_indicator.set_visible(is_full_width and self.is_active)
+        self.activity_indicator.set_visible(not is_full_width and self.is_active)
 
     def _update_animation_timer(self):
         """Starts or stops the animation timer based on activity and style."""
@@ -124,12 +146,12 @@ class TabLabelWithIndicator(TabLabelEventBox):
             GObject.source_remove(self.animation_timer_id)
             self.animation_timer_id = None
             self.animation_state = 0.0
-            self.activity_indicator.queue_draw()
+            self._get_current_indicator_widget().queue_draw()
 
     def _animate_indicator(self):
         """Callback to drive the indicator animation."""
         self.drawer.update_state(self)
-        self.activity_indicator.queue_draw()
+        self._get_current_indicator_widget().queue_draw()
         return True
 
     def on_draw_indicator(self, widget, cr):
@@ -166,8 +188,8 @@ class TabLabelWithIndicator(TabLabelEventBox):
 
     def set_activity(self, is_active):
         """Controls the visibility and animation of the activity indicator."""
-        self.activity_indicator.set_visible(is_active)
         self.is_active = is_active
+        self._update_widget_visibility()
         self._update_animation_timer()
 
 
