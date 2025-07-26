@@ -489,7 +489,10 @@ class AnimationDrawer:
         cr.fill()
 
         t = animation_state * 2 * math.pi
-        chaoticity = cpu_load / 100.0
+        
+        # Non-linear scaling for CPU load. Emphasizes lower values.
+        normalized_cpu = min(cpu_load, 100.0) / 100.0
+        chaoticity = normalized_cpu ** 0.4
 
         gradient = cairo.LinearGradient(0, 0, width, 0)
         hue1 = animation_state % 1.0
@@ -502,15 +505,34 @@ class AnimationDrawer:
         cr.set_source(gradient)
         cr.set_line_width(1.5)
 
+        # Define a pool of oscillators
+        oscillators = [
+            {'amp': 3.5, 'freq': 3, 'phase': 1.0},
+            {'amp': 1.0, 'freq': 8, 'phase': 2.2},
+            {'amp': 0.7, 'freq': 6, 'phase': 0.7},
+            {'amp': 1.2, 'freq': 12, 'phase': 3.1},
+            {'amp': 0.5, 'freq': 15, 'phase': 1.5},
+        ]
+
+        # Determine how many oscillators to use based on chaoticity
+        num_oscillators = 1 + int(chaoticity * (len(oscillators) - 1))
+
         cr.move_to(0, height / 2)
         for x in range(width):
-            y1 = (3.5 + chaoticity * 4) * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
-            y2 = (1.0 + chaoticity * 3) * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
-            y3 = (0.7 + chaoticity * 2) * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
-            
+            final_y = 0
+            for i in range(num_oscillators):
+                osc = oscillators[i]
+                # Base amplitude can also be affected
+                amp = osc['amp'] * (1 + chaoticity / 2)
+                # Frequency can also be affected
+                freq = osc['freq'] * (1 + chaoticity / 4)
+                
+                y = amp * math.sin(x * math.pi / width * (freq + math.sin(t/2)) + t * osc['phase'])
+                final_y += y
+
             modulator = (math.sin(t / 2) + 1) / 2
             decay = math.sin(animation_state * math.pi)
-            final_y = (y1 + y2 + y3) * modulator * decay
+            final_y *= modulator * decay
             
             cr.line_to(x, final_y + height / 2)
 
