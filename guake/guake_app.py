@@ -160,6 +160,12 @@ class Guake(SimpleGladeApp):
             opacity: 0.7;
             font-size: small;
         }
+        .tab-activity-indicator {
+            animation: blinker 1.5s linear infinite;
+        }
+        @keyframes blinker {
+            50% { opacity: 0; }
+        }
         """
         )
         Gtk.StyleContext.add_provider_for_screen(
@@ -334,6 +340,7 @@ class Guake(SimpleGladeApp):
                 filename,
             )
 
+        GLib.timeout_add_seconds(1, self.update_tab_activity_indicators)
         log.info("Guake initialized")
 
     def get_notebook(self):
@@ -1213,3 +1220,18 @@ class Guake(SimpleGladeApp):
         self.workspace_manager.move_terminal_to_workspace(terminal_uuid, target_workspace_id)
         active_ws_id = self.workspace_manager.workspaces_data.get("active_workspace")
         self.switch_to_workspace(active_ws_id)
+
+    def update_tab_activity_indicators(self):
+        notebook = self.get_notebook()
+        for page_num in range(notebook.get_n_pages()):
+            page = notebook.get_nth_page(page_num)
+            if not page:
+                continue
+            
+            procs = notebook.get_running_fg_processes_page(page)
+            tab_label_widget = notebook.get_tab_label(page)
+            
+            if hasattr(tab_label_widget, 'set_activity'):
+                tab_label_widget.set_activity(bool(procs))
+                
+        return True # Keep timer running

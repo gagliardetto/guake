@@ -51,6 +51,33 @@ import posix
 
 log = logging.getLogger(__name__)
 
+class TabLabelWithIndicator(TabLabelEventBox):
+    """A TabLabelEventBox that includes a blinking indicator for running processes."""
+    def __init__(self, notebook, text, settings):
+        super().__init__(notebook, text, settings)
+        
+        # The original TabLabelEventBox contains a Gtk.Label.
+        # We need to get it and repack it into a box with our indicator.
+        original_label = self.get_child()
+        if original_label:
+            self.remove(original_label)
+
+        self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        if original_label:
+            self.box.pack_start(original_label, True, True, 0)
+
+        self.activity_indicator = Gtk.Image.new_from_icon_name("media-record-symbolic", Gtk.IconSize.MENU)
+        self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
+        self.activity_indicator.set_no_show_all(True) # Initially hidden
+        self.activity_indicator.hide()
+        self.box.pack_start(self.activity_indicator, False, False, 0)
+        
+        self.add(self.box)
+        self.show_all()
+        self.activity_indicator.hide()
+
+    def set_activity(self, is_active):
+        self.activity_indicator.set_visible(is_active)
 
 class TerminalNotebook(Gtk.Notebook):
     def __init__(self, *args, **kwargs):
@@ -485,15 +512,15 @@ class TerminalNotebook(Gtk.Notebook):
         """
         page = self.get_nth_page(page_index)
         if not getattr(page, "custom_label_set", False) or user_set:
-            old_label = self.get_tab_label(page)
-            if isinstance(old_label, TabLabelEventBox):
-                old_label.set_text(new_text)
+            old_widget = self.get_tab_label(page)
+            if isinstance(old_widget, TabLabelWithIndicator):
+                old_widget.set_text(new_text)
             else:
-                label = TabLabelEventBox(self, new_text, self.guake.settings)
+                label = TabLabelWithIndicator(self, new_text, self.guake.settings)
                 label.add_events(Gdk.EventMask.SCROLL_MASK)
                 label.connect("scroll-event", self.scroll_callback.on_scroll)
-
                 self.set_tab_label(page, label)
+
             if user_set:
                 setattr(page, "custom_label_set", new_text != "-")
 

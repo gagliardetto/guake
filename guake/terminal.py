@@ -126,6 +126,9 @@ class GuakeTerminal(Vte.Terminal):
         self.envv = [f"{i}={os.environ[i]}" for i in os.environ if i not in self.ENVV_EXCLUDE_LIST]
         self.envv.append(f"GUAKE_TAB_UUID={self.uuid}")
 
+        self.is_running_process = False
+        self.last_exit_status = 0
+
     def setup_drag_and_drop(self):
         self.targets = Gtk.TargetList()
         self.targets.add_uri_targets(DropTargets.URIS)
@@ -376,6 +379,7 @@ class GuakeTerminal(Vte.Terminal):
             self.matched_value = matched_string[0]
 
     def on_child_exited(self, target, status, *user_data):
+        self.last_exit_status = status
         if None not in (libutempter, self.get_pty()):
             libutempter.utempter_remove_record(self.get_pty().get_fd())
 
