@@ -44,6 +44,7 @@ class IndicatorStyle(Enum):
     WARP_SPEED = 15
     STARGATE = 16
     CONSTELLATION = 17
+    GUITAR_STRING = 18
 
 class AnimationDrawer:
     """A class to handle the drawing of all indicator animations."""
@@ -445,3 +446,29 @@ class AnimationDrawer:
                     cr.move_to(s1['x'], s1['y'])
                     cr.line_to(s2['x'], s2['y'])
                     cr.stroke()
+
+    def draw_guitar_string(self, widget, cr, animation_state=0.0, **_kwargs):
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        t = animation_state * 2 * math.pi
+
+        gradient = cairo.LinearGradient(0, 0, width, 0)
+        hue1 = animation_state % 1.0
+        hue2 = (animation_state + 0.5) % 1.0
+        r1, g1, b1 = self._hsl_to_rgb(hue1, 1.0, 0.6)
+        r2, g2, b2 = self._hsl_to_rgb(hue2, 1.0, 0.6)
+        gradient.add_color_stop_rgb(0, r1, g1, b1)
+        gradient.add_color_stop_rgb(1, r2, g2, b2)
+
+        cr.set_source(gradient)
+        cr.set_line_width(1.5)
+
+        amplitude = 2.5
+        frequency = 2 * math.pi / width
+
+        cr.move_to(0, 0)
+        for x in range(width):
+            y = amplitude * math.sin(x * frequency * 2 + t) * math.sin(t)
+            cr.line_to(x, y + 3)
+
+        cr.stroke()
