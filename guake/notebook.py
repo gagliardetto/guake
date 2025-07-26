@@ -41,6 +41,7 @@ import uuid
 import math
 import random
 import cairo
+import psutil
 from enum import Enum
 
 gi.require_version("Gtk", "3.0")
@@ -92,7 +93,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.full_width_indicator = Gtk.DrawingArea()
         self.full_width_indicator.set_halign(Gtk.Align.FILL)
         self.full_width_indicator.set_valign(Gtk.Align.START)
-        self.full_width_indicator.set_size_request(-1, 4)
+        self.full_width_indicator.set_size_request(-1, 8)
         self.full_width_indicator.connect("draw", self.on_draw_indicator)
         self.overlay.add_overlay(self.full_width_indicator)
         self.overlay.set_overlay_pass_through(self.full_width_indicator, True)
@@ -107,9 +108,34 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.is_active = False
         self.warp_stars = []
         self.constellation_stars = []
+        self.cpu_load = 0.0
+        self.psutil_proc = None
         
         self.show_all()
         self._update_widget_visibility()
+
+    def set_process(self, pid):
+        if pid:
+            try:
+                self.psutil_proc = psutil.Process(pid)
+                self.psutil_proc.cpu_percent(interval=None)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                self.psutil_proc = None
+                self.cpu_load = 0.0
+        else:
+            self.psutil_proc = None
+            self.cpu_load = 0.0
+
+    def update_cpu_load(self):
+        if self.psutil_proc:
+            try:
+                self.cpu_load = self.psutil_proc.cpu_percent(interval=None)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                self.psutil_proc = None
+                self.cpu_load = 0.0
+        else:
+            self.cpu_load = 0.0
+        return self.cpu_load
 
     def on_style_changed(self, settings, key, user_data=None):
         """Callback for when the animation style setting changes."""
@@ -175,6 +201,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
                 'matrix_state': self.matrix_state,
                 'warp_stars': self.warp_stars,
                 'constellation_stars': self.constellation_stars,
+                'cpu_load': self.cpu_load,
             }
             
             method(widget, cr, **state_kwargs)
@@ -197,6 +224,8 @@ class TerminalNotebook(Gtk.Notebook):
     def __init__(self, *args, **kwargs):
         Gtk.Notebook.__init__(self, *args, **kwargs)
         self.last_terminal_focused = None
+        self.cpu_poll_timer_id = GObject.timeout_add_seconds(2, self.poll_cpu_usage)
+        self.current_pid = None
 
         self.set_name("notebook-teminals")
         self.set_tab_pos(Gtk.PositionType.BOTTOM)
@@ -263,6 +292,34 @@ class TerminalNotebook(Gtk.Notebook):
         self.workspace_indicator.set_margin_start(10)
         self.workspace_indicator.show()
         self.set_action_widget(self.workspace_indicator, Gtk.PackType.START)
+
+    def __del__(self):
+        if self.cpu_poll_timer_id:
+            GObject.source_remove(self.cpu_poll_timer_id)
+            self.cpu_poll_timer_id = None
+
+    def poll_cpu_usage(self):
+        if not self.get_n_pages():
+            return True
+
+        page = self.get_nth_page(self.get_current_page())
+        if not page:
+            return True
+
+        procs = self.get_running_fg_processes_page(page)
+        pid = procs[0][0] if procs else None
+
+        tab_label = self.get_tab_label(page)
+        if not isinstance(tab_label, TabLabelWithIndicator):
+            return True
+
+        if pid != self.current_pid:
+            tab_label.set_process(pid)
+            self.current_pid = pid
+
+        tab_label.update_cpu_load()
+
+        return True # Keep timer running
 
     def update_workspace_indicator(self, workspace_data):
         if workspace_data:

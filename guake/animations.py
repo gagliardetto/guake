@@ -148,7 +148,8 @@ class AnimationDrawer:
                 if not (0 < star['x'] < indicator.activity_indicator.get_allocated_width()): star['dx'] *= -1
                 if not (0 < star['y'] < indicator.activity_indicator.get_allocated_height()): star['dy'] *= -1
         elif style == IndicatorStyle.GUITAR_STRING:
-            indicator.animation_state = (indicator.animation_state + 0.008) % 1.0
+            pace = 0.008 + (indicator.cpu_load / 100.0) * 0.04
+            indicator.animation_state = (indicator.animation_state + pace) % 1.0
         
         if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX, IndicatorStyle.GUITAR_STRING]:
              indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
@@ -476,7 +477,7 @@ class AnimationDrawer:
                     cr.line_to(s2['x'], s2['y'])
                     cr.stroke()
 
-    def draw_guitar_string(self, widget, cr, animation_state=0.0, **_kwargs):
+    def draw_guitar_string(self, widget, cr, animation_state=0.0, cpu_load=0.0, **_kwargs):
         context = widget.get_style_context()
         bg_color = context.get_background_color(Gtk.StateFlags.NORMAL)
         cr.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
@@ -485,6 +486,7 @@ class AnimationDrawer:
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
         t = animation_state * 2 * math.pi
+        chaoticity = cpu_load / 100.0
 
         gradient = cairo.LinearGradient(0, 0, width, 0)
         hue1 = animation_state % 1.0
@@ -499,9 +501,9 @@ class AnimationDrawer:
 
         cr.move_to(0, height / 2)
         for x in range(width):
-            y1 = 3.5 * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
-            y2 = 1.0 * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
-            y3 = 0.7 * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
+            y1 = (3.5 + chaoticity * 2) * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
+            y2 = (1.0 + chaoticity) * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
+            y3 = (0.7 + chaoticity) * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
             
             modulator = (math.sin(t / 2) + 1) / 2
             decay = math.sin(animation_state * math.pi)
