@@ -492,7 +492,7 @@ class AnimationDrawer:
         
         # Non-linear scaling for CPU load. Emphasizes lower values.
         normalized_cpu = min(cpu_load, 100.0) / 100.0
-        chaoticity = normalized_cpu ** 0.4
+        chaoticity = normalized_cpu ** 0.3
 
         gradient = cairo.LinearGradient(0, 0, width, 0)
         hue1 = animation_state % 1.0
@@ -523,9 +523,9 @@ class AnimationDrawer:
             for i in range(num_oscillators):
                 osc = oscillators[i]
                 # Base amplitude can also be affected
-                amp = osc['amp'] * (1 + chaoticity / 2)
+                amp = osc['amp'] * (1 + chaoticity)
                 # Frequency can also be affected
-                freq = osc['freq'] * (1 + chaoticity / 4)
+                freq = osc['freq'] * (1 + chaoticity / 2)
                 
                 y = amp * math.sin(x * math.pi / width * (freq + math.sin(t/2)) + t * osc['phase'])
                 final_y += y
