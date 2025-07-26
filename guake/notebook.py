@@ -56,28 +56,52 @@ class TabLabelWithIndicator(TabLabelEventBox):
     def __init__(self, notebook, text, settings):
         super().__init__(notebook, text, settings)
         
-        # The original TabLabelEventBox contains a Gtk.Label.
-        # We need to get it and repack it into a box with our indicator.
         original_label = self.get_child()
         if original_label:
             self.remove(original_label)
 
-        self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        if original_label:
-            self.box.pack_start(original_label, True, True, 0)
-
-        self.activity_indicator = Gtk.Image.new_from_icon_name("media-record-symbolic", Gtk.IconSize.MENU)
-        self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
-        self.activity_indicator.set_no_show_all(True) # Initially hidden
-        self.activity_indicator.hide()
-        self.box.pack_start(self.activity_indicator, False, False, 0)
+        self.overlay = Gtk.Overlay()
+        self.add(self.overlay)
         
-        self.add(self.box)
+        if original_label:
+            self.overlay.add(original_label)
+
+        self.activity_indicator = Gtk.DrawingArea()
+        self.activity_indicator.set_size_request(4, 4)
+        self.activity_indicator.set_halign(Gtk.Align.END)
+        self.activity_indicator.set_valign(Gtk.Align.START)
+        # The user wants the indicator in the exact top right corner.
+        # The previous negative margins are removed to prevent the offset.
+        # Setting margins to 0 aligns the indicator's box flush with the corner.
+        self.activity_indicator.set_margin_top(0)
+        self.activity_indicator.set_margin_end(0)
+        self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
+        self.activity_indicator.connect("draw", self.on_draw_indicator)
+        
+        self.overlay.add_overlay(self.activity_indicator)
+        self.overlay.set_overlay_pass_through(self.activity_indicator, True)
+        
         self.show_all()
         self.activity_indicator.hide()
 
+    def on_draw_indicator(self, widget, cr):
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        Gtk.render_background(context, cr, 0, 0, width, height)
+        
+        r = min(width, height) / 2
+        cr.arc(r, r, r, 0, 2 * 3.14159)
+        
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+        Gdk.cairo_set_source_rgba(cr, color)
+        
+        cr.fill()
+        return False
+
     def set_activity(self, is_active):
         self.activity_indicator.set_visible(is_active)
+
 
 class TerminalNotebook(Gtk.Notebook):
     def __init__(self, *args, **kwargs):
