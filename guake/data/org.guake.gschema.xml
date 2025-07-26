@@ -424,10 +424,10 @@
         </key>
         <key
             name="tab-process-status-animation" type="i">
-            <default>1</default>
+            <default>3</default>
             <summary>Tab process status animation</summary>
             <description>Controls the animation used for the tab process status. 0: None, 1: Ripple,
-                2: Spinner</description>
+                2: Spinner, 3: Aperture, 4: Glitch</description>
         </key>
     </schema>
     <schema id="guake.style" path="/org/guake/style/">

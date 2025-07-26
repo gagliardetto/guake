@@ -55,12 +55,13 @@ log = logging.getLogger(__name__)
 
 class IndicatorStyle(Enum):
     """Enumeration for the different indicator animation styles."""
+    NONE = 0
     RIPPLE = 1
     SPINNER = 2
 
 class TabLabelWithIndicator(TabLabelEventBox):
     """A TabLabelEventBox that includes a blinking indicator for running processes."""
-    def __init__(self, notebook, text, settings, style=IndicatorStyle.SPINNER):
+    def __init__(self, notebook, text, settings):
         super().__init__(notebook, text, settings)
         
         original_label = self.get_child()
@@ -74,7 +75,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self.overlay.add(original_label)
 
         # Configurable animation style
-        self.style = style
+        self.style = IndicatorStyle(settings.general.get_int("tab-process-status-animation"))
 
         # Redesigned activity indicator
         self.activity_indicator = Gtk.DrawingArea()
@@ -177,7 +178,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
     def set_activity(self, is_active):
         """Controls the visibility and animation of the activity indicator."""
         self.activity_indicator.set_visible(is_active)
-        if is_active:
+        if is_active and self.style != IndicatorStyle.NONE:
             if self.animation_timer_id is None:
                 self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
         else:
