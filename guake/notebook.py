@@ -93,7 +93,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.full_width_indicator = Gtk.DrawingArea()
         self.full_width_indicator.set_halign(Gtk.Align.FILL)
         self.full_width_indicator.set_valign(Gtk.Align.START)
-        self.full_width_indicator.set_size_request(-1, 8)
+        self.full_width_indicator.set_size_request(-1, 4)
         self.full_width_indicator.connect("draw", self.on_draw_indicator)
         self.overlay.add_overlay(self.full_width_indicator)
         self.overlay.set_overlay_pass_through(self.full_width_indicator, True)

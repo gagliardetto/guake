@@ -478,13 +478,16 @@ class AnimationDrawer:
                     cr.stroke()
 
     def draw_guitar_string(self, widget, cr, animation_state=0.0, cpu_load=0.0, **_kwargs):
-        context = widget.get_style_context()
-        bg_color = context.get_background_color(Gtk.StateFlags.NORMAL)
-        cr.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
-        cr.paint()
-
+        # Use the provided CSS color for the background
+        r = 0x1a / 255.0
+        g = 0x1a / 255.0
+        b = 0x1a / 255.0
+        cr.set_source_rgb(r, g, b)
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+
         t = animation_state * 2 * math.pi
         chaoticity = cpu_load / 100.0
 
@@ -501,9 +504,9 @@ class AnimationDrawer:
 
         cr.move_to(0, height / 2)
         for x in range(width):
-            y1 = (3.5 + chaoticity * 2) * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
-            y2 = (1.0 + chaoticity) * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
-            y3 = (0.7 + chaoticity) * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
+            y1 = (3.5 + chaoticity * 4) * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
+            y2 = (1.0 + chaoticity * 3) * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
+            y3 = (0.7 + chaoticity * 2) * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
             
             modulator = (math.sin(t / 2) + 1) / 2
             decay = math.sin(animation_state * math.pi)
