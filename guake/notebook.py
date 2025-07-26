@@ -66,41 +66,79 @@ class TabLabelWithIndicator(TabLabelEventBox):
         if original_label:
             self.overlay.add(original_label)
 
+        # Redesigned activity indicator
         self.activity_indicator = Gtk.DrawingArea()
-        self.activity_indicator.set_size_request(4, 4)
+        self.activity_indicator.set_size_request(12, 12) # Larger area for the ripple
         self.activity_indicator.set_halign(Gtk.Align.END)
         self.activity_indicator.set_valign(Gtk.Align.START)
-        # The user wants the indicator in the exact top right corner.
-        # The previous negative margins are removed to prevent the offset.
-        # Setting margins to 0 aligns the indicator's box flush with the corner.
-        self.activity_indicator.set_margin_top(0)
-        self.activity_indicator.set_margin_end(0)
+        self.activity_indicator.set_margin_top(2) # Minor adjustment for visual centering
+        self.activity_indicator.set_margin_end(2)
         self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
         self.activity_indicator.connect("draw", self.on_draw_indicator)
         
         self.overlay.add_overlay(self.activity_indicator)
         self.overlay.set_overlay_pass_through(self.activity_indicator, True)
+
+        # Animation state for the new indicator design
+        self.animation_state = 0.0
+        self.animation_timer_id = None
         
         self.show_all()
         self.activity_indicator.hide()
 
+    def _animate_indicator(self):
+        """Callback to drive the sonar ripple animation of the indicator."""
+        # The animation state now cycles from 0.0 to 1.0 and repeats.
+        self.animation_state = (self.animation_state + 0.04) % 1.0
+
+        # Queue a redraw to show the next frame of the animation
+        self.activity_indicator.queue_draw()
+        return True # Keep the timer running
+
     def on_draw_indicator(self, widget, cr):
+        """Draws the redesigned indicator: a central dot with an expanding, fading ripple."""
         context = widget.get_style_context()
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
-        Gtk.render_background(context, cr, 0, 0, width, height)
         
-        r = min(width, height) / 2
-        cr.arc(r, r, r, 0, 2 * 3.14159)
-        
+        # Get the base color from the current theme
         color = context.get_color(Gtk.StateFlags.NORMAL)
-        Gdk.cairo_set_source_rgba(cr, color)
         
+        cx = width / 2
+        cy = height / 2
+
+        # 1. Draw the expanding sonar ripple
+        # The ripple's radius expands and its opacity fades out during the animation cycle.
+        ripple_radius = (width / 2) * self.animation_state
+        ripple_alpha = color.alpha * (1.0 - self.animation_state)
+        
+        cr.set_source_rgba(color.red, color.green, color.blue, ripple_alpha)
+        cr.set_line_width(1.5)
+        cr.arc(cx, cy, ripple_radius, 0, 2 * 3.14159)
+        cr.stroke() # Use stroke for a ring, not a filled circle
+
+        # 2. Draw the central, static dot
+        dot_radius = width / 8
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+        cr.arc(cx, cy, dot_radius, 0, 2 * 3.14159)
         cr.fill()
+        
         return False
 
     def set_activity(self, is_active):
+        """Controls the visibility and animation of the activity indicator."""
         self.activity_indicator.set_visible(is_active)
+        if is_active:
+            # Start the animation if it's not already running
+            if self.animation_timer_id is None:
+                # A 33ms interval gives a smooth ~30fps animation
+                self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
+        else:
+            # Stop the animation if it is running
+            if self.animation_timer_id is not None:
+                GObject.source_remove(self.animation_timer_id)
+                self.animation_timer_id = None
+                self.animation_state = 0.0 # Reset for next time
 
 
 class TerminalNotebook(Gtk.Notebook):
