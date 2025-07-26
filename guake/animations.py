@@ -148,7 +148,7 @@ class AnimationDrawer:
                 if not (0 < star['x'] < indicator.activity_indicator.get_allocated_width()): star['dx'] *= -1
                 if not (0 < star['y'] < indicator.activity_indicator.get_allocated_height()): star['dy'] *= -1
         elif style == IndicatorStyle.GUITAR_STRING:
-            indicator.animation_state = (indicator.animation_state + 0.01) % 1.0
+            indicator.animation_state = (indicator.animation_state + 0.008) % 1.0
         
         if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX, IndicatorStyle.GUITAR_STRING]:
              indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
@@ -477,6 +477,11 @@ class AnimationDrawer:
                     cr.stroke()
 
     def draw_guitar_string(self, widget, cr, animation_state=0.0, **_kwargs):
+        context = widget.get_style_context()
+        bg_color = context.get_background_color(Gtk.StateFlags.NORMAL)
+        cr.set_source_rgba(bg_color.red, bg_color.green, bg_color.blue, bg_color.alpha)
+        cr.paint()
+
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
         t = animation_state * 2 * math.pi
@@ -486,18 +491,17 @@ class AnimationDrawer:
         hue2 = (animation_state + 0.5) % 1.0
         r1, g1, b1 = self._hsl_to_rgb(hue1, 1.0, 0.6)
         r2, g2, b2 = self._hsl_to_rgb(hue2, 1.0, 0.6)
-        gradient.add_color_stop_rgba(0, r1, g1, b1, 0.7)
-        gradient.add_color_stop_rgba(1, r2, g2, b2, 0.7)
+        gradient.add_color_stop_rgba(0, r1, g1, b1, 0.8)
+        gradient.add_color_stop_rgba(1, r2, g2, b2, 0.8)
 
         cr.set_source(gradient)
         cr.set_line_width(1.5)
 
         cr.move_to(0, height / 2)
         for x in range(width):
-            # Combine multiple sine waves for a more complex, organic vibration
-            y1 = 3.0 * math.sin(x * math.pi / width * 3 + t)
-            y2 = 0.8 * math.sin(x * math.pi / width * 10 + t * 2)
-            y3 = 0.5 * math.sin(x * math.pi / width * 5 + t * 0.5)
+            y1 = 3.5 * math.sin(x * math.pi / width * (3 + math.sin(t/2)) + t)
+            y2 = 1.0 * math.sin(x * math.pi / width * (8 + math.cos(t)) + t * 2.2)
+            y3 = 0.7 * math.sin(x * math.pi / width * (6 + math.sin(t*2)) + t * 0.7)
             
             modulator = (math.sin(t / 2) + 1) / 2
             decay = math.sin(animation_state * math.pi)
