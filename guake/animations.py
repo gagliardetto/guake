@@ -522,10 +522,9 @@ class AnimationDrawer:
             final_y = 0
             for i in range(num_oscillators):
                 osc = oscillators[i]
-                # Base amplitude can also be affected
-                amp = osc['amp'] * (1 + chaoticity)
-                # Frequency can also be affected
-                freq = osc['freq'] * (1 + chaoticity / 2)
+                # Modulate amplitude and frequency with chaoticity, but with a dampened effect
+                amp = osc['amp'] * (1 + chaoticity * 0.5)
+                freq = osc['freq'] * (1 + chaoticity * 0.25)
                 
                 y = amp * math.sin(x * math.pi / width * (freq + math.sin(t/2)) + t * osc['phase'])
                 final_y += y
