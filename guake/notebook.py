@@ -37,6 +37,8 @@ from guake.utils import save_tabs_when_changed
 import gi
 import os
 import uuid
+import math
+from enum import Enum
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Wnck", "3.0")
@@ -51,9 +53,14 @@ import posix
 
 log = logging.getLogger(__name__)
 
+class IndicatorStyle(Enum):
+    """Enumeration for the different indicator animation styles."""
+    RIPPLE = 1
+    SPINNER = 2
+
 class TabLabelWithIndicator(TabLabelEventBox):
     """A TabLabelEventBox that includes a blinking indicator for running processes."""
-    def __init__(self, notebook, text, settings):
+    def __init__(self, notebook, text, settings, style=IndicatorStyle.SPINNER):
         super().__init__(notebook, text, settings)
         
         original_label = self.get_child()
@@ -66,12 +73,15 @@ class TabLabelWithIndicator(TabLabelEventBox):
         if original_label:
             self.overlay.add(original_label)
 
+        # Configurable animation style
+        self.style = style
+
         # Redesigned activity indicator
         self.activity_indicator = Gtk.DrawingArea()
-        self.activity_indicator.set_size_request(12, 12) # Larger area for the ripple
+        self.activity_indicator.set_size_request(14, 14)
         self.activity_indicator.set_halign(Gtk.Align.END)
         self.activity_indicator.set_valign(Gtk.Align.START)
-        self.activity_indicator.set_margin_top(2) # Minor adjustment for visual centering
+        self.activity_indicator.set_margin_top(2) 
         self.activity_indicator.set_margin_end(2)
         self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
         self.activity_indicator.connect("draw", self.on_draw_indicator)
@@ -87,41 +97,80 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.activity_indicator.hide()
 
     def _animate_indicator(self):
-        """Callback to drive the sonar ripple animation of the indicator."""
-        # The animation state now cycles from 0.0 to 1.0 and repeats.
-        self.animation_state = (self.animation_state + 0.04) % 1.0
-
-        # Queue a redraw to show the next frame of the animation
+        """Callback to drive the indicator animation."""
+        if self.style == IndicatorStyle.SPINNER:
+            self.animation_state = (self.animation_state + 0.02) % 1.0
+        elif self.style == IndicatorStyle.RIPPLE:
+            self.animation_state = (self.animation_state + 0.04) % 1.0
+        
         self.activity_indicator.queue_draw()
-        return True # Keep the timer running
+        return True
 
-    def on_draw_indicator(self, widget, cr):
-        """Draws the redesigned indicator: a central dot with an expanding, fading ripple."""
+    def _draw_spinner(self, widget, cr):
+        """Draws the 'orbital spinner' with two counter-rotating arcs."""
         context = widget.get_style_context()
         width = widget.get_allocated_width()
         height = widget.get_allocated_height()
         
-        # Get the base color from the current theme
+        color = context.get_color(Gtk.StateFlags.NORMAL)
+        
+        cx = width / 2
+        cy = height / 2
+        radius = min(width, height) / 2 - 2
+
+        cr.save()
+        cr.set_operator(0)
+        cr.paint()
+        cr.restore()
+        
+        arc_length = math.pi * 0.8
+
+        start_angle1 = self.animation_state * 2 * math.pi
+        end_angle1 = start_angle1 + arc_length
+        
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
+        cr.set_line_width(1.5)
+        cr.arc(cx, cy, radius, start_angle1, end_angle1)
+        cr.stroke()
+
+        start_angle2 = -self.animation_state * 2 * math.pi
+        end_angle2 = start_angle2 - arc_length
+        
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.4)
+        cr.set_line_width(1.5)
+        cr.arc(cx, cy, radius, start_angle2, end_angle2)
+        cr.stroke()
+
+    def _draw_ripple(self, widget, cr):
+        """Draws a central dot with an expanding, fading ripple."""
+        context = widget.get_style_context()
+        width = widget.get_allocated_width()
+        height = widget.get_allocated_height()
+        
         color = context.get_color(Gtk.StateFlags.NORMAL)
         
         cx = width / 2
         cy = height / 2
 
-        # 1. Draw the expanding sonar ripple
-        # The ripple's radius expands and its opacity fades out during the animation cycle.
         ripple_radius = (width / 2) * self.animation_state
         ripple_alpha = color.alpha * (1.0 - self.animation_state)
         
         cr.set_source_rgba(color.red, color.green, color.blue, ripple_alpha)
         cr.set_line_width(1.5)
-        cr.arc(cx, cy, ripple_radius, 0, 2 * 3.14159)
-        cr.stroke() # Use stroke for a ring, not a filled circle
+        cr.arc(cx, cy, ripple_radius, 0, 2 * math.pi)
+        cr.stroke()
 
-        # 2. Draw the central, static dot
         dot_radius = width / 8
         cr.set_source_rgba(color.red, color.green, color.blue, color.alpha)
-        cr.arc(cx, cy, dot_radius, 0, 2 * 3.14159)
+        cr.arc(cx, cy, dot_radius, 0, 2 * math.pi)
         cr.fill()
+
+    def on_draw_indicator(self, widget, cr):
+        """Dispatches to the appropriate drawing function based on the selected style."""
+        if self.style == IndicatorStyle.SPINNER:
+            self._draw_spinner(widget, cr)
+        elif self.style == IndicatorStyle.RIPPLE:
+            self._draw_ripple(widget, cr)
         
         return False
 
@@ -129,16 +178,13 @@ class TabLabelWithIndicator(TabLabelEventBox):
         """Controls the visibility and animation of the activity indicator."""
         self.activity_indicator.set_visible(is_active)
         if is_active:
-            # Start the animation if it's not already running
             if self.animation_timer_id is None:
-                # A 33ms interval gives a smooth ~30fps animation
                 self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
         else:
-            # Stop the animation if it is running
             if self.animation_timer_id is not None:
                 GObject.source_remove(self.animation_timer_id)
                 self.animation_timer_id = None
-                self.animation_state = 0.0 # Reset for next time
+                self.animation_state = 0.0
 
 
 class TerminalNotebook(Gtk.Notebook):

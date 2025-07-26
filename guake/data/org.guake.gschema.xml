@@ -414,12 +414,20 @@
             <summary>Copy selected text if enabled.</summary>
             <description>Copy the selected text.</description>
         </key>
-        <key name="sidebar-width-fraction" type="i">
+        <key
+            name="sidebar-width-fraction" type="i">
             <default>6</default>
             <summary>Width of the sidebar as a fraction of the screen width</summary>
             <description>Sets the width of the sidebar as a fraction of the screen width. The
                 value must be between 1 and 10, where 1 means screen width / 1 and 10 means
                 screen width / 10.</description>
+        </key>
+        <key
+            name="tab-process-status-animation" type="i">
+            <default>1</default>
+            <summary>Tab process status animation</summary>
+            <description>Controls the animation used for the tab process status. 0: None, 1: Ripple,
+                2: Spinner</description>
         </key>
     </schema>
     <schema id="guake.style" path="/org/guake/style/">
