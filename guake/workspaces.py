@@ -15,6 +15,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gio, Gdk, GLib
 
 from guake.utils import save_tabs_when_changed
+from .emoji_selector import SearchableEmojiSelector
 
 import logging
 
@@ -644,6 +645,32 @@ class WorkspaceManager:
         """Callback to add a new terminal tab to a specific workspace."""
         self.guake_app.add_tab_to_workspace(workspace_id)
 
+    def on_choose_emoji(self, button, icon_entry):
+        """Opens the searchable emoji selector."""
+        emoji_file = self.guake_app.settings.general.get_string("emoji-file")
+        if not emoji_file:
+            log.error("Emoji file path not configured in settings.")
+            # Optionally, show an error dialog to the user
+            error_dialog = Gtk.MessageDialog(
+                parent=self.guake_app.window,
+                flags=0,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text="Emoji file not configured",
+                secondary_text="Please set the 'emoji-file' path in Guake's settings."
+            )
+            error_dialog.run()
+            error_dialog.destroy()
+            return
+
+        dialog = SearchableEmojiSelector(self.guake_app.window, emoji_file)
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK and dialog.selected_emoji:
+            icon_entry.set_text(dialog.selected_emoji)
+        
+        dialog.destroy()
+
     @save_tabs_when_changed
     def on_rename_workspace(self, menu_item, workspace_id):
         """Opens a dialog to rename the workspace and change its icon."""
@@ -658,10 +685,18 @@ class WorkspaceManager:
 
         name_entry = Gtk.Entry(text=ws["name"])
         icon_entry = Gtk.Entry(text=ws.get("icon", ""), max_length=2)
+        
+        icon_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        icon_box.pack_start(icon_entry, True, True, 0)
+        
+        emoji_button = Gtk.Button.new_with_label("😀")
+        emoji_button.connect("clicked", self.on_choose_emoji, icon_entry)
+        icon_box.pack_start(emoji_button, False, False, 0)
+
         grid.attach(Gtk.Label(label="Name:", xalign=0), 0, 0, 1, 1)
         grid.attach(name_entry, 1, 0, 1, 1)
         grid.attach(Gtk.Label(label="Icon:", xalign=0), 0, 1, 1, 1)
-        grid.attach(icon_entry, 1, 1, 1, 1)
+        grid.attach(icon_box, 1, 1, 1, 1)
         
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b".error { border: 1px solid red; border-radius: 4px; }")

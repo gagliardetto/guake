@@ -441,6 +441,16 @@
                 VOXEL_GRID = 11
             </description>
         </key>
+        <key
+            name="emoji-file" type="s">
+            <default>'/home/runner/.config/guake/categories.min.json'</default>
+            <summary>
+                Path to the emoji file.
+            </summary>
+            <description>
+                Path to the emoji file. This file is used to populate the emoji picker dialog.
+            </description>
+        </key>
     </schema>
     <schema id="guake.style" path="/org/guake/style/">
         <key name="cursor-blink-mode" type="i">
