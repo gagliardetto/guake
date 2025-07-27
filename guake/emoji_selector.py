@@ -16,6 +16,7 @@ class SearchableEmojiSelector(Gtk.Dialog):
     """
     A dialog window that allows users to search for and select an emoji.
     """
+    _emoji_cache = None
 
     def __init__(self, parent, emoji_file_path):
         """
@@ -84,7 +85,15 @@ class SearchableEmojiSelector(Gtk.Dialog):
         self.show_all()
 
     def _load_emojis(self, emoji_file_path):
-        """Loads emoji data from the specified JSON file."""
+        """
+        Loads emoji data from the specified JSON file, using a cache to avoid
+        reading the file more than once.
+        """
+        if SearchableEmojiSelector._emoji_cache is not None:
+            log.debug("Loading emojis from cache.")
+            return SearchableEmojiSelector._emoji_cache
+
+        log.debug("Loading emojis from file: %s", emoji_file_path)
         path = Path(emoji_file_path)
         if not path.exists():
             log.error("Emoji file not found at: %s", emoji_file_path)
@@ -92,7 +101,8 @@ class SearchableEmojiSelector(Gtk.Dialog):
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("emojis", {})
+            SearchableEmojiSelector._emoji_cache = data.get("emojis", {})
+            return SearchableEmojiSelector._emoji_cache
         except (json.JSONDecodeError, IOError) as e:
             log.error("Failed to load or parse emoji file %s: %s", emoji_file_path, e)
             return None
@@ -168,4 +178,3 @@ class SearchableEmojiSelector(Gtk.Dialog):
         """Callback for when an emoji button is clicked."""
         self.selected_emoji = emoji
         self.response(Gtk.ResponseType.OK)
-
