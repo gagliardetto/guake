@@ -7,6 +7,7 @@ import json
 import logging
 from pathlib import Path
 import re
+from collections import OrderedDict
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
@@ -14,7 +15,7 @@ from gi.repository import Gtk, Gdk, GLib
 log = logging.getLogger(__name__)
 
 # --- Constants ---
-DEBOUNCE_DELAY = 300  # milliseconds
+DEBOUNCE_DELAY = 150  # milliseconds
 MAX_RECENT_EMOJIS = 20
 
 class SearchableEmojiSelector(Gtk.Dialog):
@@ -23,7 +24,7 @@ class SearchableEmojiSelector(Gtk.Dialog):
     Features:
     - Lazy loading of emojis for fast startup.
     - Debounced search to avoid UI lag.
-    - Token-based search in categories, subcategories, and emoji names.
+    - Pre-built search index for fast filtering.
     - "Recently Used" section for quick access.
     - Full keyboard navigation.
     - Caches emoji file to avoid re-reading from disk.
@@ -47,10 +48,11 @@ class SearchableEmojiSelector(Gtk.Dialog):
         # --- Instance variables ---
         self.history_file_path = Path(history_file_path)
         self.selected_emoji = None
-        self.emojis_data = self._load_emojis(emoji_file_path)
+        self._load_emojis(emoji_file_path) # Ensures cache and index are built
         self.recent_emojis = self._load_recent_emojis()
         self.populate_generator_id = None
         self.debounce_timer_id = None
+        self._map_handler_id = None
 
         # --- Event connections ---
         self.connect("key-press-event", self._on_key_press)
@@ -76,11 +78,20 @@ class SearchableEmojiSelector(Gtk.Dialog):
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         scrolled_window.add(self.listbox)
-
-        self._populate_list()
+        
+        # Defer the expensive list population until the dialog is shown
+        self._map_handler_id = self.connect("map-event", self._on_first_map)
 
         self.show_all()
-        self.search_entry.grab_focus() # Set initial focus
+        self.search_entry.grab_focus()
+
+    def _on_first_map(self, widget, event):
+        """Called only once when the dialog is first shown to do the initial population."""
+        if self._map_handler_id:
+            self.handler_disconnect(self._map_handler_id)
+            self._map_handler_id = None
+        self._populate_list()
+        return False
 
     def _setup_css(self):
         """Loads custom CSS for the dialog's widgets."""
@@ -125,7 +136,6 @@ class SearchableEmojiSelector(Gtk.Dialog):
             self.response(Gtk.ResponseType.CANCEL)
             return True
         
-        # Forward navigation keys to the handler if focus is not on search entry
         if not self.search_entry.has_focus():
             if keyval in (Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_Left, Gdk.KEY_Right, Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab):
                 return self._handle_navigation(keyval)
@@ -146,7 +156,7 @@ class SearchableEmojiSelector(Gtk.Dialog):
         self.debounce_timer_id = None
         filter_text = self.search_entry.get_text().strip()
         self._populate_list(filter_text)
-        return False # Do not run timer again
+        return False
 
     def _on_emoji_clicked(self, button, emoji_info):
         """Callback for when an emoji button is clicked."""
@@ -196,7 +206,7 @@ class SearchableEmojiSelector(Gtk.Dialog):
             else:
                 self._navigate_to_adjacent_flowbox(flowbox, "prev")
         
-        return True # We handled the event
+        return True
 
     def _navigate_to_adjacent_flowbox(self, current_flowbox, direction):
         """Moves focus to the next or previous FlowBox in the ListBox."""
@@ -210,15 +220,12 @@ class SearchableEmojiSelector(Gtk.Dialog):
 
         step = 1 if direction == "next" else -1
         
-        # Find the next row that contains a FlowBox
         for i in range(current_idx + step, len(all_rows) if step > 0 else -1, step):
             row = all_rows[i]
             child = row.get_child()
             if isinstance(child, Gtk.FlowBox):
-                target_flowbox = child
-                target_children = target_flowbox.get_children()
+                target_children = child.get_children()
                 if target_children:
-                    # Focus the first item if moving next, last if moving prev
                     focus_idx = 0 if direction == "next" else -1
                     target_children[focus_idx].grab_focus()
                     break
@@ -226,23 +233,38 @@ class SearchableEmojiSelector(Gtk.Dialog):
     # --- Data Loading and Persistence ---
 
     def _load_emojis(self, emoji_file_path):
-        """Loads emoji data from JSON, using a class-level cache."""
+        """Loads emoji data and builds a search index, using a class-level cache."""
         if SearchableEmojiSelector._emoji_cache is not None:
-            return SearchableEmojiSelector._emoji_cache
+            return
 
         log.info("Loading emojis from file for the first time: %s", emoji_file_path)
         path = Path(emoji_file_path)
         if not path.exists():
             log.error("Emoji file not found at: %s", emoji_file_path)
-            return None
+            return
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
+            
             SearchableEmojiSelector._emoji_cache = data.get("emojis", {})
-            return SearchableEmojiSelector._emoji_cache
+            
+            # Build the search index once
+            index = []
+            for category, subcategories in SearchableEmojiSelector._emoji_cache.items():
+                for subcategory, emojis in subcategories.items():
+                    for emoji_info in emojis:
+                        searchable_text = (
+                            f"{category} {subcategory} {emoji_info['name']}"
+                        ).lower().replace('-', ' ')
+                        index.append({
+                            "search_text": searchable_text,
+                            "category": category,
+                            "emoji_info": emoji_info
+                        })
+            SearchableEmojiSelector._search_index = index
+
         except (json.JSONDecodeError, IOError) as e:
             log.error("Failed to load or parse emoji file %s: %s", emoji_file_path, e)
-            return None
 
     def _load_recent_emojis(self):
         """Loads the list of recently used emojis from its JSON file."""
@@ -314,7 +336,6 @@ class SearchableEmojiSelector(Gtk.Dialog):
         
         for emoji_info in emojis:
             button = Gtk.Button(label=emoji_info["emoji"])
-            # Set accessible name for screen readers
             accessible = button.get_accessible()
             accessible.set_property("accessible-name", emoji_info["name"])
             
@@ -331,12 +352,11 @@ class SearchableEmojiSelector(Gtk.Dialog):
 
     def _create_widget_generator(self, filter_text=None):
         """A generator that yields ListBoxRows for the emoji list."""
-        if not self.emojis_data:
+        if not SearchableEmojiSelector._search_index:
             yield Gtk.Label(label="Could not load emoji data.")
             return
 
-        query_tokens = re.split(r'\s+', filter_text.lower()) if filter_text else []
-
+        # --- Recently Used Section ---
         if not filter_text and self.recent_emojis:
             header_row = Gtk.ListBoxRow(selectable=False)
             header_row.get_style_context().add_class("category-header-row")
@@ -349,26 +369,26 @@ class SearchableEmojiSelector(Gtk.Dialog):
             emoji_row.add(self._create_emoji_flowbox(self.recent_emojis))
             yield emoji_row
 
-        for category, subcategories in self.emojis_data.items():
-            emojis_in_category = []
+        # --- Filter and Group Emojis ---
+        results_by_category = OrderedDict()
+        query_tokens = re.split(r'\s+', filter_text.lower()) if filter_text else []
+        
+        for item in SearchableEmojiSelector._search_index:
+            if not query_tokens or self._tokenize_and_match(query_tokens, item["search_text"]):
+                category = item["category"]
+                if category not in results_by_category:
+                    results_by_category[category] = []
+                results_by_category[category].append(item["emoji_info"])
+
+        # --- Yield Widgets from Grouped Results ---
+        for category, emojis in results_by_category.items():
+            header_row = Gtk.ListBoxRow(selectable=False)
+            header_row.get_style_context().add_class("category-header-row")
+            header_label = Gtk.Label(label=category, xalign=0)
+            header_label.get_style_context().add_class("category-header-label")
+            header_row.add(header_label)
+            yield header_row
             
-            for subcategory, emojis in subcategories.items():
-                for emoji_info in emojis:
-                    searchable_text = (
-                        f"{category} {subcategory} {emoji_info['name']}"
-                    ).lower().replace('-', ' ')
-                    
-                    if not query_tokens or self._tokenize_and_match(query_tokens, searchable_text):
-                        emojis_in_category.append(emoji_info)
-            
-            if emojis_in_category:
-                header_row = Gtk.ListBoxRow(selectable=False)
-                header_row.get_style_context().add_class("category-header-row")
-                header_label = Gtk.Label(label=category, xalign=0)
-                header_label.get_style_context().add_class("category-header-label")
-                header_row.add(header_label)
-                yield header_row
-                
-                emoji_row = Gtk.ListBoxRow(selectable=False)
-                emoji_row.add(self._create_emoji_flowbox(emojis_in_category))
-                yield emoji_row
+            emoji_row = Gtk.ListBoxRow(selectable=False)
+            emoji_row.add(self._create_emoji_flowbox(emojis))
+            yield emoji_row
