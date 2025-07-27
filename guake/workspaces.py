@@ -48,6 +48,7 @@ class WorkspaceManager:
         """
         self.guake_app = guake_app
         self.config_path = self.guake_app.get_xdg_config_directory() / "workspaces.json"
+        self.emoji_recently_used = self.guake_app.get_xdg_config_directory() / "emoji_recently_used.json"
         self.workspaces_data = {}
         self.widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.widget.get_style_context().add_class("sidebar")
@@ -663,7 +664,7 @@ class WorkspaceManager:
             error_dialog.destroy()
             return
 
-        dialog = SearchableEmojiSelector(self.guake_app.window, emoji_file)
+        dialog = SearchableEmojiSelector(self.guake_app.window, emoji_file, self.emoji_recently_used)
         response = dialog.run()
 
         if response == Gtk.ResponseType.OK and dialog.selected_emoji:
