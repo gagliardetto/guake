@@ -134,16 +134,12 @@ class TabLabelWithIndicator(TabLabelEventBox):
     def poll_cpu_usage(self):
         """
         Checks for a running process and updates the activity state. If the style
-        is GUITAR_STRING, it also polls for CPU usage. The pending_update flag
-        is used to prevent visibility changes until the poll is complete.
+        is GUITAR_STRING, it also polls for CPU usage.
         """
         page_num = self.notebook.find_tab_index_by_label(self)
         if page_num == -1:
-            # Tab might be closing, so we ensure activity is off.
             self.set_activity(False)
             self.cpu_load = 0.0
-            self.pending_update = False
-            self._update_widget_visibility()
             return True
 
         page = self.notebook.get_nth_page(page_num)
@@ -168,10 +164,6 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self.set_activity(False)
             self.cpu_load = 0.0
         
-        # Mark the update as complete and trigger a final visibility check.
-        self.pending_update = False
-        self._update_widget_visibility()
-        
         return True # Keep timer running
 
     def on_style_changed(self, settings, key, user_data=None):
@@ -187,10 +179,10 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self.cpu_load = 0.0
 
         self._update_widget_visibility()
-        self._update_animation_timer()
-        # Re-evaluate timers and activity state
-        self.set_focused(self.is_focused)
-
+        # Restart timers to apply new style
+        if self.is_active:
+            self._stop_timers()
+            self._start_timers()
 
     def _get_current_indicator_widget(self):
         target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
@@ -202,50 +194,21 @@ class TabLabelWithIndicator(TabLabelEventBox):
         target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
         is_full_width = target == AnimationTarget.FULL_WIDTH
         
-        show = self.is_active and not self.pending_update
-
-        self.full_width_indicator.set_visible(is_full_width and show)
-        self.activity_indicator.set_visible(not is_full_width and show)
-
-    def _update_animation_timer(self):
-        """Starts or stops the animation timer based on activity and style."""
-        should_animate = self.is_active and self.style != IndicatorStyle.NONE
-
-        if should_animate and self.is_focused and self.animation_timer_id is None:
-            # Focused tab gets a high-frequency timer for smooth animation
-            self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
-        elif not (should_animate and self.is_focused) and self.animation_timer_id is not None:
-            GObject.source_remove(self.animation_timer_id)
-            self.animation_timer_id = None
-
-        if not self.is_active and self.background_poll_timer_id is not None:
-             GObject.source_remove(self.background_poll_timer_id)
-             self.background_poll_timer_id = None
+        self.full_width_indicator.set_visible(is_full_width and self.is_active)
+        self.activity_indicator.set_visible(not is_full_width and self.is_active)
 
     def _animate_indicator(self):
         """Callback to drive the indicator animation."""
         if self.is_active:
             self.drawer.update_state(self)
             self._get_current_indicator_widget().queue_draw()
-        return self.is_active # Continue only if active
+        else:
+            # This case should not be reached with the new logic, but it's a good safeguard.
+            self.animation_timer_id = None
+        return self.is_active
 
-    def set_activity(self, is_active):
-        """Controls the visibility and animation of the activity indicator."""
-        if self.is_active == is_active:
-            return
-        self.is_active = is_active
-        self._update_widget_visibility()
-        self._update_animation_timer()
-
-    def set_focused(self, is_focused):
-        """Sets the focus state and adjusts timers accordingly."""
-        if self.is_focused == is_focused and not self.pending_update:
-            return
-        
-        self.is_focused = is_focused
-        self.pending_update = True
-        
-        # Stop all existing timers
+    def _stop_timers(self):
+        """Stops and clears all timers for this tab."""
         if self.animation_timer_id:
             GObject.source_remove(self.animation_timer_id)
             self.animation_timer_id = None
@@ -253,16 +216,43 @@ class TabLabelWithIndicator(TabLabelEventBox):
             GObject.source_remove(self.background_poll_timer_id)
             self.background_poll_timer_id = None
 
-        # Start the appropriate new timer
-        if is_focused:
-            # High-frequency animation and polling when focused
-            self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
-            self.background_poll_timer_id = GObject.timeout_add(1000, self.poll_cpu_usage)
-        else:
-            # Low-frequency polling when in the background
-            self.background_poll_timer_id = GObject.timeout_add(2000, self.poll_cpu_usage)
+    def _start_timers(self):
+        """Starts the appropriate timers based on the current state."""
+        self._stop_timers() # Ensure no duplicates are running
+
+        should_animate = self.style != IndicatorStyle.NONE
+        if should_animate:
+            # Adjust animation frame rate based on focus to save CPU.
+            animation_interval = 33 if self.is_focused else 100  # ~30fps vs 10fps
+            self.animation_timer_id = GObject.timeout_add(animation_interval, self._animate_indicator)
+
+        # Polling is always needed for active tabs to detect when the process ends.
+        polling_interval = 2000
+        self.background_poll_timer_id = GObject.timeout_add(polling_interval, self.poll_cpu_usage)
+        self.poll_cpu_usage() # Poll immediately to set the initial state.
+
+    def set_activity(self, is_active):
+        """Controls the visibility and timers for the activity indicator."""
+        if self.is_active == is_active:
+            return
+        self.is_active = is_active
         
-        self.poll_cpu_usage() # Initial poll
+        self._update_widget_visibility()
+
+        if self.is_active:
+            self._start_timers()
+        else:
+            self._stop_timers()
+
+    def set_focused(self, is_focused):
+        """Sets the focus state and adjusts timer frequencies for performance."""
+        if self.is_focused == is_focused:
+            return
+        self.is_focused = is_focused
+        
+        # If the tab is active, restart the timers to apply the new frequency.
+        if self.is_active:
+            self._start_timers()
 
 
 class TerminalNotebook(Gtk.Notebook):

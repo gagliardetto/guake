@@ -137,9 +137,10 @@ class AnimationDrawer:
         """Updates the animation state for the current style."""
         style = indicator.style
         
-        if style == IndicatorStyle.SPINNER:
-            indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
-        elif style == IndicatorStyle.RIPPLE:
+        # This function has been refactored to use a clear if/elif/else structure.
+        # This prevents bugs where an animation state might be updated twice or not at all.
+
+        if style == IndicatorStyle.RIPPLE:
             indicator.animation_state = (indicator.animation_state + 0.04) % 1.0
         elif style == IndicatorStyle.APERTURE:
             indicator.animation_state += indicator.animation_direction * 0.02
@@ -147,6 +148,7 @@ class AnimationDrawer:
                 indicator.animation_direction *= -1
                 indicator.animation_state = max(0.0, min(1.0, indicator.animation_state))
         elif style == IndicatorStyle.GLITCH:
+            # Glitch animation is based on random state changes, not a continuous animation_state.
             indicator.glitch_state = (0, 0, False)
             if random.random() < 0.1:
                 offset_x = random.randint(-2, 2)
@@ -160,6 +162,7 @@ class AnimationDrawer:
             if indicator.animation_state < 0.02:
                 indicator.firefly_state = (random.uniform(0.2, 0.8), random.uniform(0.2, 0.8), 0)
         elif style == IndicatorStyle.MATRIX:
+            # Matrix animation is based on its own state list, not a continuous animation_state.
             if not indicator.matrix_state or random.random() < 0.3:
                 indicator.matrix_state.append([random.randint(0, 8), 0])
             for drop in indicator.matrix_state:
@@ -185,17 +188,16 @@ class AnimationDrawer:
                 if not (0 < star['x'] < indicator.activity_indicator.get_allocated_width()): star['dx'] *= -1
                 if not (0 < star['y'] < indicator.activity_indicator.get_allocated_height()): star['dy'] *= -1
         elif style == IndicatorStyle.GUITAR_STRING:
-            # A calm, constant speed for the wave animation
+            # This style has its own specific animation pace.
             pace = 0.008
             indicator.animation_state = (indicator.animation_state + pace) % 1.0
             
             # Smoothly transition the color_load_state towards the actual cpu_load
-            # This creates a smooth color change instead of abrupt jumps.
             target_load = min(indicator.cpu_load, 100.0)
             indicator.color_load_state += (target_load - indicator.color_load_state) * 0.05
-        
-        if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX, IndicatorStyle.GUITAR_STRING]:
-             indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
+        else:
+            # Generic update for all other styles (SPINNER, PLASMA, etc.)
+            indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
 
     def draw_spinner(self, widget, cr, animation_state=0.0, **_kwargs):
         context = widget.get_style_context()
