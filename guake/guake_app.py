@@ -182,7 +182,6 @@ class Guake(SimpleGladeApp):
         self.hidden = True
         self.forceHide = False
         self.mouse_in_hot_edge = False
-        self.is_restoring_session = False
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
         self.new_workspace_placeholder = None
@@ -369,7 +368,7 @@ class Guake(SimpleGladeApp):
         # Do not update and save the active terminal while a session is being restored
         # or during the initial application startup sequence. This prevents the saved
         # active terminal from being overwritten by programmatic tab switches.
-        if self.is_restoring_session or self.is_starting_up:
+        if self.is_starting_up:
             return
 
         terminal = notebook.get_current_terminal()
@@ -939,7 +938,7 @@ class Guake(SimpleGladeApp):
         self.load_config(terminal_uuid=terminal.uuid)
         terminal.handler_ids.append(terminal.connect("window-title-changed", self.on_terminal_title_changed, terminal))
         terminal.directory = terminal.get_current_directory()
-        if hasattr(self, 'workspace_manager') and self.workspace_manager and not self.is_restoring_session:
+        if hasattr(self, 'workspace_manager') and self.workspace_manager:
             if self.adding_tab_to_workspace_id:
                 self.workspace_manager.add_terminal_to_workspace(str(terminal.uuid), self.adding_tab_to_workspace_id)
             else:
@@ -1058,7 +1057,6 @@ class Guake(SimpleGladeApp):
                                 all_session_uuids.add(pane["uuid"])
 
         # 2. Hide notebook and set restoring flag
-        self.is_restoring_session = True
         notebook = self.get_notebook()
         notebook.hide()
 
@@ -1095,7 +1093,6 @@ class Guake(SimpleGladeApp):
 
         # 5. Show notebook, unset flag, and switch to active workspace
         notebook.show()
-        self.is_restoring_session = False
         if active_workspace_id and self.workspace_manager.get_workspace_by_id(active_workspace_id):
             self.switch_to_workspace(active_workspace_id)
         elif self.workspace_manager.get_all_workspaces():
