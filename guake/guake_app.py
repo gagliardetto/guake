@@ -78,7 +78,6 @@ from guake.utils import RectCalculator
 from guake.utils import TabNameUtils
 from guake.utils import get_server_time
 from guake.utils import save_tabs_when_changed
-from guake.world_map import WorldMapView
 from guake.workspaces import WorkspaceManager
 
 log = logging.getLogger(__name__)
@@ -282,9 +281,6 @@ class Guake(SimpleGladeApp):
         self.window.connect("motion-notify-event", self.on_window_motion)
         self.window.connect("focus-out-event", self.on_window_losefocus)
         self.window.connect("focus-in-event", self.on_window_takefocus)
-
-        self.world_map_view = WorldMapView(self)
-        self.world_map_visible = False
 
         def destroy(*args):
             self.hide()
@@ -1092,23 +1088,6 @@ class Guake(SimpleGladeApp):
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)
-
-    def accel_world_map_navigation(self, *args):
-        current_notebook = self.notebook_manager.get_current_notebook()
-        if self.world_map_visible:
-            self.mainframe.remove(self.world_map_view)
-            self.mainframe.pack_start(current_notebook, True, True, 0)
-            current_notebook.show()
-            self.world_map_visible = False
-            self.set_terminal_focus()
-        else:
-            self.world_map_view.refresh_view(force_data_update=False)
-            self.mainframe.remove(current_notebook)
-            self.mainframe.pack_start(self.world_map_view, True, True, 0)
-            self.world_map_view.show()
-            self.world_map_visible = True
-            self.world_map_view.grab_focus()
-        return True
 
     def switch_to_workspace(self, workspace_id):
         if not workspace_id or not self.workspace_manager: return

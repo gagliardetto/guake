@@ -108,7 +108,6 @@ HOTKEYS = [
             {"key": "close-tab", "label": _("Close tab")},
             {"key": "rename-current-tab", "label": _("Rename current tab")},
             {"key": "quick-tab-navigation", "label": _("Quick tab navigation")},
-            {"key": "world-map-navigation", "label": _("World Map navigation")},
         ],
     },
     {
