@@ -26,9 +26,11 @@ class SearchableEmojiSelector(Gtk.Dialog):
         Initializes the emoji selector dialog.
         """
         super().__init__(title="Select an Emoji", parent=parent, flags=0)
-        self.add_button("Abort", Gtk.ResponseType.CANCEL)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
         self.set_default_size(500, 600)
         self.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+
+        self.connect("key-press-event", self._on_key_press)
 
         self.selected_emoji = None
         self.emojis_data = self._load_emojis(emoji_file_path)
@@ -87,6 +89,13 @@ class SearchableEmojiSelector(Gtk.Dialog):
         self._populate_grid()
 
         self.show_all()
+
+    def _on_key_press(self, widget, event):
+        """Handles key press events for the dialog."""
+        if event.keyval == Gdk.KEY_Escape:
+            self.response(Gtk.ResponseType.CANCEL)
+            return True  # Event handled, stop propagation
+        return False  # Propagate other key presses
 
     def _load_emojis(self, emoji_file_path):
         """
