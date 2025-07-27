@@ -349,10 +349,6 @@ class WorkspaceManager:
         count_label.get_style_context().add_class("dim-label")
         row_box.pack_start(count_label, False, False, 0)
 
-        if is_pinned:
-            pin_icon = Gtk.Image.new_from_icon_name("pin-symbolic", Gtk.IconSize.MENU)
-            row_box.pack_start(pin_icon, False, False, 0)
-
         if not is_special:
             status = self._git_status_cache.get(ws_data["id"], 'no-git')
             icon_name, tooltip = self._get_git_icon_and_tooltip(status)
