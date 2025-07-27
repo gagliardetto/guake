@@ -518,6 +518,13 @@ class WorkspaceManager:
         # and trigger another save.
         self.guake_app.switch_to_workspace(workspace_id)
         listbox.select_row(row)
+    def update_workspace_list_selection(self, workspace_id):
+        """Updates the workspace list selection to the specified workspace ID."""
+        for row in self.workspace_listbox.get_children():
+            if row.get_name() == workspace_id:
+                self.workspace_listbox.select_row(row)
+                return
+        log.warning("Workspace %s not found in the list.", workspace_id)
 
     def add_terminal_to_workspace(self, terminal_uuid, workspace_id):
         """Adds a terminal to a specific workspace and saves the state."""
@@ -572,7 +579,7 @@ class WorkspaceManager:
         if active_ws:
             # check that the terminal_uuid is in the workspace's terminals
             if terminal_uuid not in active_ws.get("terminals", []):
-                log.warning("Terminal %s not found in active workspace %s terminals.", terminal_uuid, active_ws["id"])
+                log.warning("WARN: Terminal %s not found in active workspace %s terminals.", terminal_uuid, active_ws["id"])
                 return
             active_ws["active_terminal"] = terminal_uuid
             self.save_workspaces()

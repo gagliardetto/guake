@@ -800,8 +800,10 @@ class Guake(SimpleGladeApp):
             selection = dialog.get_selection()
             if selection:
                 self.workspace_manager.workspaces_data["active_workspace"] = selection['workspace_id']
-                self.switch_to_workspace(selection['workspace_id'])
                 self.get_notebook().set_current_page(selection['page_index'])
+                self.switch_to_workspace(selection['workspace_id'])
+                self.workspace_manager.update_workspace_list_selection(selection['workspace_id'])
+                self.update_active_workspace_indicator()
         dialog.destroy()
         HidePrevention(self.window).allow()
         return True
