@@ -500,26 +500,23 @@ class WorkspaceManager:
             log.error("Error during DnD reorder: %s", e)
             context.finish(False, False, timestamp)
 
-    @save_tabs_when_changed
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
         workspace_id = row.get_name()
         if not workspace_id:
             return
 
-        # If the workspace to be activated is already the active one, do nothing.
-        # This is crucial on startup, where Guake might try to activate the
-        # already-active workspace. Allowing this to proceed calls save_tabs()
-        # (via the decorator) before the UI has restored the correct active
-        # terminal, causing the default (first) terminal to be saved as active,
-        # overwriting the user's session.
         if self.workspaces_data.get("active_workspace") == workspace_id:
             return
 
         self.workspaces_data["active_workspace"] = workspace_id
+        # Save the active workspace change immediately to prevent race conditions.
         self.save_workspaces()
-        listbox.select_row(row)
+        
+        # The switch will trigger on_tab_switch, which will set the active_terminal
+        # and trigger another save.
         self.guake_app.switch_to_workspace(workspace_id)
+        listbox.select_row(row)
 
     def add_terminal_to_workspace(self, terminal_uuid, workspace_id):
         """Adds a terminal to a specific workspace and saves the state."""
@@ -567,7 +564,15 @@ class WorkspaceManager:
 
     def set_active_terminal_for_active_workspace(self, terminal_uuid):
         active_ws = self.get_active_workspace()
+        if not active_ws:
+            log.warning("No active workspace found to set active terminal.")
+            return
+        log.info("Setting active terminal %s for workspace %s", terminal_uuid, active_ws["id"])
         if active_ws:
+            # check that the terminal_uuid is in the workspace's terminals
+            if terminal_uuid not in active_ws.get("terminals", []):
+                log.warning("Terminal %s not found in active workspace %s terminals.", terminal_uuid, active_ws["id"])
+                return
             active_ws["active_terminal"] = terminal_uuid
             self.save_workspaces()
 

@@ -187,6 +187,7 @@ class Guake(SimpleGladeApp):
         self.sidebar_last_opened_time = 0.0
         self.new_workspace_placeholder = None
         self.is_starting_up = True
+        self.page_reorder_handler_id = None
 
         # trayicon!
         img = pixmapfile("guake-tray.png")
@@ -352,7 +353,9 @@ class Guake(SimpleGladeApp):
 
     def notebook_created(self, nm, notebook, key):
         notebook.attach_guake(self)
-        notebook.connect("page-reordered", self.on_page_reorder)
+        if self.page_reorder_handler_id:
+            notebook.disconnect(self.page_reorder_handler_id)
+        self.page_reorder_handler_id = notebook.connect("page-reordered", self.on_page_reorder)
         notebook.connect("page-removed", self.on_tab_closed)
         notebook.connect("switch-page", self.on_tab_switch)
         if hasattr(notebook, "right_click_menu"):
@@ -364,6 +367,7 @@ class Guake(SimpleGladeApp):
         # or during the initial application startup sequence. This prevents the saved
         # active terminal from being overwritten by programmatic tab switches.
         if self.is_restoring_session or self.is_starting_up:
+            log.warning("Skipping active terminal update during session restore or startup.")
             return
 
         terminal = notebook.get_current_terminal()
@@ -1129,24 +1133,52 @@ class Guake(SimpleGladeApp):
         else:
             # This is a workspace with terminals, or the special one
             notebook.show()
-            all_pages = [(i, notebook.get_nth_page(i)) for i in range(notebook.get_n_pages())]
-            page_map = {str(list(p.iter_terminals())[0].uuid): (i, p) for i, p in all_pages if list(p.iter_terminals())}
 
-            for _, page in all_pages: page.hide()
+            if self.page_reorder_handler_id:
+                notebook.handler_block(self.page_reorder_handler_id)
 
-            first_visible_page_idx = -1
-            page_to_focus_idx = -1
-            
+            all_pages = [notebook.get_nth_page(i) for i in range(notebook.get_n_pages())]
+            page_map = {str(list(p.iter_terminals())[0].uuid): p for p in all_pages if list(p.iter_terminals())}
+
+            # Hide all pages first to avoid visual glitches
+            for page in all_pages:
+                page.hide()
+
+            # Get the page widgets for the current workspace, in the correct order
+            pages_in_ws_ordered = []
             for term_uuid in terminals_in_ws:
                 if term_uuid in page_map:
-                    idx, page = page_map[term_uuid]
-                    page.show()
-                    if first_visible_page_idx == -1: first_visible_page_idx = idx
-                    if term_uuid == workspace.get("active_terminal"): page_to_focus_idx = idx
+                    pages_in_ws_ordered.append(page_map[term_uuid])
+
+            # Reorder the child widgets in the notebook to match the workspace's defined order
+            for i, page in enumerate(pages_in_ws_ordered):
+                notebook.reorder_child(page, i)
+
+            # Now, make only the pages for this workspace visible
+            for page in pages_in_ws_ordered:
+                page.show()
+
+            # Determine which page to focus
+            page_to_focus = None
+            active_terminal_uuid = workspace.get("active_terminal")
+            if active_terminal_uuid and active_terminal_uuid in page_map:
+                page_to_focus = page_map[active_terminal_uuid]
+
+            # If the designated active terminal isn't in this workspace, or none was set, default to the first one.
+            if not page_to_focus or page_to_focus not in pages_in_ws_ordered:
+                if pages_in_ws_ordered:
+                    page_to_focus = pages_in_ws_ordered[0]
+
+            # Set the current page
+            if page_to_focus:
+                # The page_num is now its actual index after reordering
+                page_num_to_focus = notebook.page_num(page_to_focus)
+                if page_num_to_focus != -1:
+                    notebook.set_current_page(page_num_to_focus)
+                    self.set_terminal_focus()
             
-            if first_visible_page_idx != -1:
-                notebook.set_current_page(page_to_focus_idx if page_to_focus_idx != -1 else first_visible_page_idx)
-                self.set_terminal_focus()
+            if self.page_reorder_handler_id:
+                notebook.handler_unblock(self.page_reorder_handler_id)
         
         self.update_active_workspace_indicator()
 
