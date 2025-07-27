@@ -85,7 +85,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.activity_indicator.set_margin_top(2) 
         self.activity_indicator.set_margin_end(2)
         self.activity_indicator.get_style_context().add_class("tab-activity-indicator")
-        self.activity_indicator.connect("draw", self.on_draw_indicator)
+        self.activity_indicator.connect("draw", self.drawer.on_draw_indicator, self)
         self.overlay.add_overlay(self.activity_indicator)
         self.overlay.set_overlay_pass_through(self.activity_indicator, True)
 
@@ -94,21 +94,25 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.full_width_indicator.set_halign(Gtk.Align.FILL)
         self.full_width_indicator.set_valign(Gtk.Align.START)
         self.full_width_indicator.set_size_request(-1, 4)
-        self.full_width_indicator.connect("draw", self.on_draw_indicator)
+        self.full_width_indicator.connect("draw", self.drawer.on_draw_indicator, self)
         self.overlay.add_overlay(self.full_width_indicator)
         self.overlay.set_overlay_pass_through(self.full_width_indicator, True)
 
         # Animation state
         self.animation_state = 0.0
         self.animation_timer_id = None
+        self.background_poll_timer_id = None
         self.animation_direction = 1
         self.glitch_state = (0, 0, False)
         self.firefly_state = (0, 0, 0)
         self.matrix_state = []
         self.is_active = False
+        self.is_focused = False
+        self.pending_update = False
         self.warp_stars = []
         self.constellation_stars = []
         self.cpu_load = 0.0
+        self.color_load_state = 0.0
         self.psutil_proc = None
         
         self.show_all()
@@ -118,6 +122,7 @@ class TabLabelWithIndicator(TabLabelEventBox):
         if pid:
             try:
                 self.psutil_proc = psutil.Process(pid)
+                # Initialize CPU percent calculation
                 self.psutil_proc.cpu_percent(interval=None)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 self.psutil_proc = None
@@ -126,16 +131,48 @@ class TabLabelWithIndicator(TabLabelEventBox):
             self.psutil_proc = None
             self.cpu_load = 0.0
 
-    def update_cpu_load(self):
+    def poll_cpu_usage(self):
+        """
+        Checks for a running process and updates the activity state. If the style
+        is GUITAR_STRING, it also polls for CPU usage. The pending_update flag
+        is used to prevent visibility changes until the poll is complete.
+        """
+        page_num = self.notebook.find_tab_index_by_label(self)
+        if page_num == -1:
+            # Tab might be closing, so we ensure activity is off.
+            self.set_activity(False)
+            self.cpu_load = 0.0
+            self.pending_update = False
+            self._update_widget_visibility()
+            return True
+
+        page = self.notebook.get_nth_page(page_num)
+        procs = self.notebook.get_running_fg_processes_page(page)
+        pid = procs[0][0] if procs else None
+
+        current_label_pid = self.psutil_proc.pid if self.psutil_proc else None
+
+        if pid != current_label_pid:
+            self.set_process(pid)
+
         if self.psutil_proc:
-            try:
-                self.cpu_load = self.psutil_proc.cpu_percent(interval=None)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                self.psutil_proc = None
+            self.set_activity(True)
+            if self.style == IndicatorStyle.GUITAR_STRING:
+                try:
+                    self.cpu_load = self.psutil_proc.cpu_percent(interval=None)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    self.set_process(None)
+            else:
                 self.cpu_load = 0.0
         else:
+            self.set_activity(False)
             self.cpu_load = 0.0
-        return self.cpu_load
+        
+        # Mark the update as complete and trigger a final visibility check.
+        self.pending_update = False
+        self._update_widget_visibility()
+        
+        return True # Keep timer running
 
     def on_style_changed(self, settings, key, user_data=None):
         """Callback for when the animation style setting changes."""
@@ -145,8 +182,15 @@ class TabLabelWithIndicator(TabLabelEventBox):
         except ValueError:
             log.warning("Invalid value for tab-process-status-animation: %s", new_style_value)
             self.style = IndicatorStyle.NONE
+        
+        if self.style != IndicatorStyle.GUITAR_STRING:
+            self.cpu_load = 0.0
+
         self._update_widget_visibility()
         self._update_animation_timer()
+        # Re-evaluate timers and activity state
+        self.set_focused(self.is_focused)
+
 
     def _get_current_indicator_widget(self):
         target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
@@ -157,75 +201,74 @@ class TabLabelWithIndicator(TabLabelEventBox):
     def _update_widget_visibility(self):
         target = self.drawer.STYLE_TARGETS.get(self.style, AnimationTarget.CORNER)
         is_full_width = target == AnimationTarget.FULL_WIDTH
+        
+        show = self.is_active and not self.pending_update
 
-        self.full_width_indicator.set_visible(is_full_width and self.is_active)
-        self.activity_indicator.set_visible(not is_full_width and self.is_active)
+        self.full_width_indicator.set_visible(is_full_width and show)
+        self.activity_indicator.set_visible(not is_full_width and show)
 
     def _update_animation_timer(self):
         """Starts or stops the animation timer based on activity and style."""
         should_animate = self.is_active and self.style != IndicatorStyle.NONE
-        
-        if should_animate and self.animation_timer_id is None:
-            interval = 100 if self.style in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX] else 33
-            self.animation_timer_id = GObject.timeout_add(interval, self._animate_indicator)
-        elif not should_animate and self.animation_timer_id is not None:
+
+        if should_animate and self.is_focused and self.animation_timer_id is None:
+            # Focused tab gets a high-frequency timer for smooth animation
+            self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
+        elif not (should_animate and self.is_focused) and self.animation_timer_id is not None:
             GObject.source_remove(self.animation_timer_id)
             self.animation_timer_id = None
-            self.animation_state = 0.0
-            self._get_current_indicator_widget().queue_draw()
+
+        if not self.is_active and self.background_poll_timer_id is not None:
+             GObject.source_remove(self.background_poll_timer_id)
+             self.background_poll_timer_id = None
 
     def _animate_indicator(self):
         """Callback to drive the indicator animation."""
-        self.drawer.update_state(self)
-        self._get_current_indicator_widget().queue_draw()
-        return True
-
-    def on_draw_indicator(self, widget, cr):
-        """Dispatches to the appropriate drawing function based on the selected style."""
-        cr.save()
-        cr.set_operator(cairo.OPERATOR_CLEAR)
-        cr.paint()
-        cr.restore()
-
-        if self.style == IndicatorStyle.NONE:
-            return False
-
-        try:
-            method_name = f"draw_{self.style.name.lower()}"
-            method = getattr(self.drawer, method_name)
-
-            state_kwargs = {
-                'animation_state': self.animation_state,
-                'glitch_state': self.glitch_state,
-                'firefly_state': self.firefly_state,
-                'matrix_state': self.matrix_state,
-                'warp_stars': self.warp_stars,
-                'constellation_stars': self.constellation_stars,
-                'cpu_load': self.cpu_load,
-            }
-            
-            method(widget, cr, **state_kwargs)
-
-        except AttributeError:
-            log.error("Draw method %s not found in AnimationDrawer", method_name)
-        except Exception as e:
-            log.error("Error drawing indicator: %s", e)
-
-        return False
+        if self.is_active:
+            self.drawer.update_state(self)
+            self._get_current_indicator_widget().queue_draw()
+        return self.is_active # Continue only if active
 
     def set_activity(self, is_active):
         """Controls the visibility and animation of the activity indicator."""
+        if self.is_active == is_active:
+            return
         self.is_active = is_active
         self._update_widget_visibility()
         self._update_animation_timer()
+
+    def set_focused(self, is_focused):
+        """Sets the focus state and adjusts timers accordingly."""
+        if self.is_focused == is_focused and not self.pending_update:
+            return
+        
+        self.is_focused = is_focused
+        self.pending_update = True
+        
+        # Stop all existing timers
+        if self.animation_timer_id:
+            GObject.source_remove(self.animation_timer_id)
+            self.animation_timer_id = None
+        if self.background_poll_timer_id:
+            GObject.source_remove(self.background_poll_timer_id)
+            self.background_poll_timer_id = None
+
+        # Start the appropriate new timer
+        if is_focused:
+            # High-frequency animation and polling when focused
+            self.animation_timer_id = GObject.timeout_add(33, self._animate_indicator)
+            self.background_poll_timer_id = GObject.timeout_add(1000, self.poll_cpu_usage)
+        else:
+            # Low-frequency polling when in the background
+            self.background_poll_timer_id = GObject.timeout_add(2000, self.poll_cpu_usage)
+        
+        self.poll_cpu_usage() # Initial poll
 
 
 class TerminalNotebook(Gtk.Notebook):
     def __init__(self, *args, **kwargs):
         Gtk.Notebook.__init__(self, *args, **kwargs)
         self.last_terminal_focused = None
-        self.cpu_poll_timer_id = GObject.timeout_add_seconds(2, self.poll_cpu_usage)
-        self.current_pid = None
 
         self.set_name("notebook-teminals")
         self.set_tab_pos(Gtk.PositionType.BOTTOM)
@@ -258,6 +301,7 @@ class TerminalNotebook(Gtk.Notebook):
         self.scroll_callback = NotebookScrollCallback(self)
         self.add_events(Gdk.EventMask.SCROLL_MASK)
         self.connect("scroll-event", self.scroll_callback.on_scroll)
+        self.connect("switch-page", self.on_switch_page)
         self.notebook_on_button_press_id = self.connect(
             "button-press-event", self.on_button_press, None
         )
@@ -293,33 +337,19 @@ class TerminalNotebook(Gtk.Notebook):
         self.workspace_indicator.show()
         self.set_action_widget(self.workspace_indicator, Gtk.PackType.START)
 
-    def __del__(self):
-        if self.cpu_poll_timer_id:
-            GObject.source_remove(self.cpu_poll_timer_id)
-            self.cpu_poll_timer_id = None
+    def on_switch_page(self, notebook, page, page_num):
+        self.update_all_tabs_activity()
 
-    def poll_cpu_usage(self):
-        if not self.get_n_pages():
-            return True
-
-        page = self.get_nth_page(self.get_current_page())
-        if not page:
-            return True
-
-        procs = self.get_running_fg_processes_page(page)
-        pid = procs[0][0] if procs else None
-
-        tab_label = self.get_tab_label(page)
-        if not isinstance(tab_label, TabLabelWithIndicator):
-            return True
-
-        if pid != self.current_pid:
-            tab_label.set_process(pid)
-            self.current_pid = pid
-
-        tab_label.update_cpu_load()
-
-        return True # Keep timer running
+    def update_all_tabs_activity(self):
+        """
+        Updates the focus state for all tab labels. The focused tab will get
+        a high-frequency timer, while others get a low-frequency timer.
+        """
+        current_page_index = self.get_current_page()
+        for i, page in enumerate(self.iter_pages()):
+            tab_label = self.get_tab_label(page)
+            if isinstance(tab_label, TabLabelWithIndicator):
+                tab_label.set_focused(i == current_page_index)
 
     def update_workspace_indicator(self, workspace_data):
         if workspace_data:
@@ -490,6 +520,7 @@ class TerminalNotebook(Gtk.Notebook):
 
     def get_running_fg_processes_page(self, page):
         processes = []
+        if not page: return []
         for terminal in page.get_terminals():
             pty = terminal.get_pty()
             if not pty:
@@ -561,10 +592,12 @@ class TerminalNotebook(Gtk.Notebook):
     def remove_page(self, page_num):
         super().remove_page(page_num)
         # focusing the first terminal on the previous page
-        if self.get_current_page() > -1:
-            page = self.get_nth_page(self.get_current_page())
-            if page.get_terminals():
-                page.get_terminals()[0].grab_focus()
+        if self.get_n_pages() > 0:
+            if self.get_current_page() > -1:
+                page = self.get_nth_page(self.get_current_page())
+                if page.get_terminals():
+                    page.get_terminals()[0].grab_focus()
+            self.update_all_tabs_activity()
 
         self.hide_tabbar_if_one_tab()
         self.emit("page-deleted")
@@ -603,6 +636,10 @@ class TerminalNotebook(Gtk.Notebook):
         if self.guake:
             # Attack background image draw callback to root terminal box
             root_terminal_box.connect_after("draw", self.guake.background_image_manager.draw)
+        
+        # After adding a new page, update all tab activities
+        self.update_all_tabs_activity()
+        
         return root_terminal_box, page_num, terminal
 
     def hide_tabbar_if_one_tab(self):
@@ -682,6 +719,8 @@ class TerminalNotebook(Gtk.Notebook):
         an update from the vte (eg. vte:window-title-changed)
         """
         page = self.get_nth_page(page_index)
+        if not page: return
+
         if not getattr(page, "custom_label_set", False) or user_set:
             old_widget = self.get_tab_label(page)
             if isinstance(old_widget, TabLabelWithIndicator):
@@ -691,6 +730,7 @@ class TerminalNotebook(Gtk.Notebook):
                 label.add_events(Gdk.EventMask.SCROLL_MASK)
                 label.connect("scroll-event", self.scroll_callback.on_scroll)
                 self.set_tab_label(page, label)
+                self.update_all_tabs_activity()
 
             if user_set:
                 setattr(page, "custom_label_set", new_text != "-")

@@ -23,6 +23,9 @@ import random
 import cairo
 from enum import Enum
 from gi.repository import Gdk, Gtk
+import logging
+
+log = logging.getLogger(__name__)
 
 class IndicatorStyle(Enum):
     """Enumeration for the different indicator animation styles."""
@@ -96,6 +99,40 @@ class AnimationDrawer:
             b = hue2rgb(p, q, h - 1/3)
         return r, g, b
 
+    def on_draw_indicator(self, widget, cr, indicator):
+        """Dispatches to the appropriate drawing function based on the selected style."""
+        cr.save()
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.paint()
+        cr.restore()
+
+        if indicator.style == IndicatorStyle.NONE:
+            return False
+
+        try:
+            method_name = f"draw_{indicator.style.name.lower()}"
+            method = getattr(self, method_name)
+
+            state_kwargs = {
+                'animation_state': indicator.animation_state,
+                'glitch_state': indicator.glitch_state,
+                'firefly_state': indicator.firefly_state,
+                'matrix_state': indicator.matrix_state,
+                'warp_stars': indicator.warp_stars,
+                'constellation_stars': indicator.constellation_stars,
+                'cpu_load': indicator.cpu_load,
+                'color_load': indicator.color_load_state,
+            }
+            
+            method(widget, cr, **state_kwargs)
+
+        except AttributeError:
+            log.error("Draw method %s not found in AnimationDrawer", method_name)
+        except Exception as e:
+            log.error("Error drawing indicator: %s", e)
+
+        return False
+
     def update_state(self, indicator):
         """Updates the animation state for the current style."""
         style = indicator.style
@@ -148,8 +185,14 @@ class AnimationDrawer:
                 if not (0 < star['x'] < indicator.activity_indicator.get_allocated_width()): star['dx'] *= -1
                 if not (0 < star['y'] < indicator.activity_indicator.get_allocated_height()): star['dy'] *= -1
         elif style == IndicatorStyle.GUITAR_STRING:
-            pace = 0.008 + (indicator.cpu_load / 100.0) * 0.04
+            # A calm, constant speed for the wave animation
+            pace = 0.008
             indicator.animation_state = (indicator.animation_state + pace) % 1.0
+            
+            # Smoothly transition the color_load_state towards the actual cpu_load
+            # This creates a smooth color change instead of abrupt jumps.
+            target_load = min(indicator.cpu_load, 100.0)
+            indicator.color_load_state += (target_load - indicator.color_load_state) * 0.05
         
         if style not in [IndicatorStyle.GLITCH, IndicatorStyle.MATRIX, IndicatorStyle.GUITAR_STRING]:
              indicator.animation_state = (indicator.animation_state + 0.02) % 1.0
@@ -477,11 +520,10 @@ class AnimationDrawer:
                     cr.line_to(s2['x'], s2['y'])
                     cr.stroke()
 
-    def draw_guitar_string(self, widget, cr, animation_state=0.0, cpu_load=0.0, **_kwargs):
+    def draw_guitar_string(self, widget, cr, animation_state=0.0, color_load=0.0, **_kwargs):
         """
-        Draws a sea-like wave that becomes choppier and "hotter" with CPU load.
-        The wave is composed of multiple oscillators to create a fluid, non-blurry
-        motion, transitioning from cool blues to hot reds.
+        Draws a calm, sea-like wave. The color of the wave becomes "hotter"
+        with CPU load, but the wave's shape remains constant and gentle.
         """
         # Set a dark background
         r = 0x1a / 255.0
@@ -495,12 +537,10 @@ class AnimationDrawer:
 
         t = animation_state * 2 * math.pi
         
-        # Non-linear scaling for CPU load for more visual impact.
-        load_factor = (min(cpu_load, 100.0) / 100.0) ** 0.5
+        # --- Dynamic Color Palette based on smoothed CPU load ---
+        load_factor = (color_load / 100.0) ** 0.5
 
-        # --- Dynamic Color Palette ---
         # Interpolate hue from a cool blue (0.6) to a hot red (0.0) based on load.
-        # A second hue is calculated for the gradient.
         hot_hue = (0.6 - load_factor * 0.6) % 1.0
         hot_hue2 = (hot_hue + 0.2) % 1.0
         
@@ -513,24 +553,15 @@ class AnimationDrawer:
         cr.set_source(gradient)
         cr.set_line_width(1.2)
 
-        # --- Sea-like Wave Generation ---
-        # The wave is a sum of several oscillators to create a complex, sea-like effect.
-        # Amplitudes and frequencies are influenced by CPU load.
+        # --- Calm, Sea-like Wave Generation ---
+        # The wave shape is now constant and not affected by CPU load.
+        # It's composed of two simple sine waves to create a gentle, rolling effect.
         
-        # Base swell of the sea
-        amp1 = height / 4 * (1 + load_factor * 1.5)
+        amp1 = height / 4.0
         freq1 = 2.0
-        y1 = math.sin(t + 0 * math.pi / width * freq1) * amp1
-
-        # Choppiness on top of the swell
-        amp2 = height / 8 * (1 + load_factor * 2.0)
+        
+        amp2 = height / 8.0
         freq2 = 5.0
-        y2 = math.sin(t * 1.5 + 0 * math.pi / width * freq2) * amp2
-
-        # Finer ripples
-        amp3 = height / 20 * (1 + load_factor * 1.0)
-        freq3 = 12.0
-        y3 = math.sin(t * 0.8 + 0 * math.pi / width * freq3) * amp3
 
         cr.move_to(0, height / 2)
         for x in range(int(width)):
@@ -539,10 +570,9 @@ class AnimationDrawer:
             # Update each wave component for the current x position
             y1 = math.sin(t + nx * math.pi * freq1) * amp1
             y2 = math.sin(t * 1.5 + nx * math.pi * freq2) * amp2
-            y3 = math.sin(t * 0.8 + nx * math.pi * freq3) * amp3
             
             # Sum the waves to get the final position
-            final_y = (y1 + y2 + y3) / 3.0
+            final_y = (y1 + y2) / 2.0
             
             # Apply a decay envelope to keep the wave contained at the edges
             edge_decay = math.sin(nx * math.pi) ** 0.5
