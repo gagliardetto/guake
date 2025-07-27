@@ -513,6 +513,7 @@ class WorkspaceManager:
         # Save the active workspace change immediately to prevent race conditions.
         self.save_workspaces()
         
+        log.info("Switching to workspace %s", workspace_id)
         # The switch will trigger on_tab_switch, which will set the active_terminal
         # and trigger another save.
         self.guake_app.switch_to_workspace(workspace_id)

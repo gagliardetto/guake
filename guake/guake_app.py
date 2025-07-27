@@ -369,10 +369,13 @@ class Guake(SimpleGladeApp):
         if self.is_restoring_session or self.is_starting_up:
             log.warning("Skipping active terminal update during session restore or startup.")
             return
-
-        terminal = notebook.get_current_terminal()
+        log.info("Switching to page_num %s", page_num)
+        current_notebook = self.notebook_manager.get_current_notebook()
+        terminal = current_notebook.get_terminals_for_page(page_num)[0] 
+        log.info("Current terminal UUID: %s (label: %s)", terminal.uuid, current_notebook.get_tab_text_page(page))
         if terminal and self.workspace_manager:
             self.workspace_manager.set_active_terminal_for_active_workspace(str(terminal.uuid))
+            terminal.grab_focus()
 
     def update_visual(self, user_data=None):
         screen = self.window.get_screen()
@@ -1114,6 +1117,12 @@ class Guake(SimpleGladeApp):
         
         notebook = self.get_notebook()
 
+        active_terminal_uuid = workspace.get("active_terminal")
+        log.info("Switching to workspace %s (%s) where active_terminal = %s", workspace_id, workspace.get("name", "Unnamed"), active_terminal_uuid)
+        log.debug("notebook has %d pages", notebook.get_n_pages())
+        # list terminal labels
+        log.debug("Current terminal labels: %s", [notebook.get_tab_text_page(page) for page in notebook.get_children()])
+
         # If placeholder exists, remove it
         if self.new_workspace_placeholder and self.new_workspace_placeholder.get_parent():
             self.mainframe.remove(self.new_workspace_placeholder)
@@ -1160,9 +1169,16 @@ class Guake(SimpleGladeApp):
 
             # Determine which page to focus
             page_to_focus = None
-            active_terminal_uuid = workspace.get("active_terminal")
+            log.info("Active terminal UUID for workspace %s: %s", workspace_id, active_terminal_uuid)
             if active_terminal_uuid and active_terminal_uuid in page_map:
                 page_to_focus = page_map[active_terminal_uuid]
+                log.debug("page_to_focus= %s for workspace %s", page_to_focus, workspace_id)
+                log.info("Focusing page_to_focus %d for workspace %s", notebook.page_num(page_to_focus), workspace_id)
+
+                current_notebook = self.notebook_manager.get_current_notebook()
+                terminal = current_notebook.get_terminals_for_page(notebook.page_num(page_to_focus))[0] 
+                if terminal:
+                    terminal.grab_focus()
 
             # If the designated active terminal isn't in this workspace, or none was set, default to the first one.
             if not page_to_focus or page_to_focus not in pages_in_ws_ordered:
@@ -1174,6 +1190,7 @@ class Guake(SimpleGladeApp):
                 # The page_num is now its actual index after reordering
                 page_num_to_focus = notebook.page_num(page_to_focus)
                 if page_num_to_focus != -1:
+                    log.info("Setting current page to %d for workspace %s", page_num_to_focus, workspace_id)
                     notebook.set_current_page(page_num_to_focus)
                     self.set_terminal_focus()
             
