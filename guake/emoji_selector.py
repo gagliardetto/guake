@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 log = logging.getLogger(__name__)
 
@@ -16,6 +16,9 @@ class SearchableEmojiSelector(Gtk.Dialog):
     """
     A dialog window that allows users to search for and select an emoji.
     """
+    # Class-level cache for emoji data. This ensures the JSON file is read
+    # and parsed only once per application session, making subsequent openings
+    # of the selector instantaneous.
     _emoji_cache = None
 
     def __init__(self, parent, emoji_file_path):
@@ -29,6 +32,7 @@ class SearchableEmojiSelector(Gtk.Dialog):
 
         self.selected_emoji = None
         self.emojis_data = self._load_emojis(emoji_file_path)
+        self.populate_generator_id = None
 
         # Add custom CSS for hover effect
         css_provider = Gtk.CssProvider()
@@ -86,14 +90,14 @@ class SearchableEmojiSelector(Gtk.Dialog):
 
     def _load_emojis(self, emoji_file_path):
         """
-        Loads emoji data from the specified JSON file, using a cache to avoid
-        reading the file more than once.
+        Loads emoji data from the specified JSON file, using a class-level cache
+        to avoid reading and parsing the file more than once per session.
         """
         if SearchableEmojiSelector._emoji_cache is not None:
             log.debug("Loading emojis from cache.")
             return SearchableEmojiSelector._emoji_cache
 
-        log.debug("Loading emojis from file: %s", emoji_file_path)
+        log.info("Loading emojis from file for the first time: %s", emoji_file_path)
         path = Path(emoji_file_path)
         if not path.exists():
             log.error("Emoji file not found at: %s", emoji_file_path)
@@ -107,24 +111,23 @@ class SearchableEmojiSelector(Gtk.Dialog):
             log.error("Failed to load or parse emoji file %s: %s", emoji_file_path, e)
             return None
 
-    def _populate_grid(self, filter_text=None):
-        """Populates the flowbox with emojis, optionally filtered by text."""
-        # Clear existing children
-        for child in self.flowbox.get_children():
-            self.flowbox.remove(child)
-
+    def _create_widget_generator(self, filter_text=None):
+        """
+        A generator that yields widgets for the emoji grid. This allows for
+        lazy creation of widgets, keeping the UI responsive.
+        """
         if not self.emojis_data:
-            self.flowbox.add(Gtk.Label(label="Could not load emoji data."))
+            yield Gtk.Label(label="Could not load emoji data.")
             return
 
         filter_text = filter_text.lower() if filter_text else None
 
         for category, subcategories in self.emojis_data.items():
-            category_widgets = []
+            category_widgets_to_yield = []
             has_matching_emojis_in_category = False
 
             for subcategory, emojis in subcategories.items():
-                subcategory_widgets = []
+                subcategory_widgets_to_yield = []
                 has_matching_emojis_in_subcategory = False
 
                 for emoji_info in emojis:
@@ -143,31 +146,54 @@ class SearchableEmojiSelector(Gtk.Dialog):
                     cell.get_style_context().add_class("emoji-cell")
                     cell.add(button)
                     
-                    subcategory_widgets.append(cell)
+                    subcategory_widgets_to_yield.append(cell)
 
                 if has_matching_emojis_in_subcategory:
-                    # Add subcategory header if it has content
                     subcategory_header = Gtk.Label(label=subcategory.replace('-', ' ').capitalize(), xalign=0)
                     subcategory_header.get_style_context().add_class("subcategory-header")
-                    category_widgets.append(subcategory_header)
-                    category_widgets.extend(subcategory_widgets)
+                    category_widgets_to_yield.append(subcategory_header)
+                    category_widgets_to_yield.extend(subcategory_widgets_to_yield)
 
             if has_matching_emojis_in_category:
-                # Add category header if it has content
                 category_header = Gtk.Label(label=category, xalign=0)
                 category_header.get_style_context().add_class("category-header")
-                self.flowbox.add(category_header)
+                yield category_header
                 
-                # Use a separator widget to force headers onto their own line in FlowBox
-                separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                separator.set_size_request(self.get_allocated_width(), 1)
-                self.flowbox.add(separator)
+                # This separator forces a line break for the category header.
+                yield Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
 
-                for widget in category_widgets:
+                for widget in category_widgets_to_yield:
+                    yield widget
+
+    def _populate_grid(self, filter_text=None):
+        """
+        Populates the flowbox lazily using an idle callback. This prevents the
+        UI from freezing while creating a large number of emoji widgets.
+        """
+        if self.populate_generator_id:
+            GLib.source_remove(self.populate_generator_id)
+            self.populate_generator_id = None
+
+        for child in self.flowbox.get_children():
+            self.flowbox.remove(child)
+
+        generator = self._create_widget_generator(filter_text)
+
+        def add_chunk_of_widgets():
+            # Add a chunk of widgets in each idle cycle to keep UI responsive.
+            CHUNK_SIZE = 100
+            for _ in range(CHUNK_SIZE):
+                try:
+                    widget = next(generator)
                     self.flowbox.add(widget)
+                except StopIteration:
+                    self.flowbox.show_all()
+                    self.populate_generator_id = None
+                    return False  # Stop the idle source
+            self.flowbox.show_all()
+            return True  # Continue the idle source
 
-        self.flowbox.show_all()
-
+        self.populate_generator_id = GLib.idle_add(add_chunk_of_widgets)
 
     def _on_filter_changed(self, search_entry):
         """Callback for when the search entry text changes."""
