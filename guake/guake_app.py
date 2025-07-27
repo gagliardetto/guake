@@ -182,6 +182,7 @@ class Guake(SimpleGladeApp):
         self.hidden = True
         self.forceHide = False
         self.mouse_in_hot_edge = False
+        self.is_restoring_session = False
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
         self.new_workspace_placeholder = None
@@ -268,13 +269,6 @@ class Guake(SimpleGladeApp):
         self.sidebar_revealer.add(self.workspace_manager.widget)
         self.workspace_manager.widget.show_all()
 
-        # Suppress workspace saving during startup to prevent race conditions.
-        # The original method is restored and called at the end of initialization.
-        original_save_workspaces = self.workspace_manager.save_workspaces
-        def suppressed_save():
-            log.info("Workspace save suppressed during startup.")
-        self.workspace_manager.save_workspaces = suppressed_save
-
         self.update_visual()
         self.window.get_screen().connect("composited-changed", self.update_visual)
 
@@ -315,8 +309,13 @@ class Guake(SimpleGladeApp):
 
         if self.settings.general.get_boolean("restore-tabs-startup"):
             self.restore_tabs(suppress_notify=True)
-        else:
-            self.workspace_manager.reconcile_orphan_tabs()
+
+        # After tabs are restored, get their UUIDs and validate the workspace data.
+        all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+        self.workspace_manager.validate_loaded_workspaces(all_uuids)
+
+        # Now reconcile any terminals that were in the session but not in workspaces.json
+        self.workspace_manager.reconcile_orphan_tabs()
 
         initial_workspace_id = self.workspace_manager.workspaces_data.get("active_workspace")
         if initial_workspace_id and self.workspace_manager.get_workspace_by_id(initial_workspace_id):
@@ -345,10 +344,6 @@ class Guake(SimpleGladeApp):
 
         GLib.timeout_add_seconds(1, self.update_tab_activity_indicators)
         
-        # Restore the original save method and perform a final save with the correct state.
-        self.workspace_manager.save_workspaces = original_save_workspaces
-        self.workspace_manager.save_workspaces()
-        
         log.info("Guake initialized")
         self.is_starting_up = False
 
@@ -368,7 +363,7 @@ class Guake(SimpleGladeApp):
         # Do not update and save the active terminal while a session is being restored
         # or during the initial application startup sequence. This prevents the saved
         # active terminal from being overwritten by programmatic tab switches.
-        if self.is_starting_up:
+        if self.is_restoring_session or self.is_starting_up:
             return
 
         terminal = notebook.get_current_terminal()
@@ -938,7 +933,7 @@ class Guake(SimpleGladeApp):
         self.load_config(terminal_uuid=terminal.uuid)
         terminal.handler_ids.append(terminal.connect("window-title-changed", self.on_terminal_title_changed, terminal))
         terminal.directory = terminal.get_current_directory()
-        if hasattr(self, 'workspace_manager') and self.workspace_manager:
+        if hasattr(self, 'workspace_manager') and self.workspace_manager and not self.is_restoring_session:
             if self.adding_tab_to_workspace_id:
                 self.workspace_manager.add_terminal_to_workspace(str(terminal.uuid), self.adding_tab_to_workspace_id)
             else:
@@ -1057,6 +1052,7 @@ class Guake(SimpleGladeApp):
                                 all_session_uuids.add(pane["uuid"])
 
         # 2. Hide notebook and set restoring flag
+        self.is_restoring_session = True
         notebook = self.get_notebook()
         notebook.hide()
 
@@ -1093,6 +1089,7 @@ class Guake(SimpleGladeApp):
 
         # 5. Show notebook, unset flag, and switch to active workspace
         notebook.show()
+        self.is_restoring_session = False
         if active_workspace_id and self.workspace_manager.get_workspace_by_id(active_workspace_id):
             self.switch_to_workspace(active_workspace_id)
         elif self.workspace_manager.get_all_workspaces():

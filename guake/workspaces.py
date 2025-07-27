@@ -65,7 +65,7 @@ class WorkspaceManager:
             Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        self.load_workspaces()
+        self._load_data()
         self._build_header()
         self._build_workspace_list()
         self._start_refresh_timer()
@@ -74,34 +74,63 @@ class WorkspaceManager:
         xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "~/.config")
         return Path(xdg_config_home, "guake").expanduser()
 
-    def load_workspaces(self):
-        """Loads workspace data from workspaces.json, with validation."""
+    def _load_data(self):
+        """Loads workspace data from workspaces.json, without validation."""
         if self.config_path.exists():
             try:
                 with self.config_path.open("r", encoding="utf-8") as f:
                     loaded_data = json.load(f)
-
                 if isinstance(loaded_data, dict) and "workspaces" in loaded_data:
                     self.workspaces_data = loaded_data
-                    log.info("Workspaces loaded from %s", self.config_path)
+                    log.info("Workspaces loaded from %s (pre-validation)", self.config_path)
                 else:
-                    log.warning("workspaces.json is malformed. A backup will be created and settings reset.")
-                    backup_path = self.config_path.with_name(f"{self.config_path.name}.bak")
-                    try:
-                        shutil.copy(self.config_path, backup_path)
-                        log.info("Malformed workspaces file backed up to %s", backup_path)
-                    except Exception as backup_error:
-                        log.error("Could not create backup of workspaces file: %s", backup_error)
+                    log.warning("workspaces.json is malformed. Using default config.")
                     self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
-                    self.save_workspaces()
-
             except (json.JSONDecodeError, IOError) as e:
                 log.error("Failed to load or parse workspaces file: %s. Using default config.", e)
                 self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
         else:
             log.info("No workspaces.json found, using default config.")
             self.workspaces_data = DEFAULT_WORKSPACES_CONFIG
-            self.save_workspaces()
+
+    def validate_loaded_workspaces(self, existing_terminal_uuids):
+        """
+        Validates and cleans the loaded workspace data against a provided list of
+        existing terminal UUIDs. This should be called after tabs are restored.
+        """
+        log.info("Validating loaded workspace data...")
+        all_terminal_uuids = set(existing_terminal_uuids)
+        
+        terminal_to_workspace_map = {}
+        workspaces = self.workspaces_data.get("workspaces", [])
+        
+        for ws in workspaces:
+            terminals_to_keep = []
+            for term_uuid in ws.get("terminals", []):
+                if term_uuid in terminal_to_workspace_map:
+                    log.warning(
+                        "Terminal %s already belongs to workspace %s, but also found in workspace %s; removing from workspace %s",
+                        term_uuid, terminal_to_workspace_map[term_uuid], ws.get("name"), ws.get("name")
+                    )
+                    continue
+                
+                if term_uuid not in all_terminal_uuids:
+                    log.warning("Terminal %s from workspace '%s' not found in session; dropping.", term_uuid, ws.get("name"))
+                    continue
+                
+                terminal_to_workspace_map[term_uuid] = ws.get("name")
+                terminals_to_keep.append(term_uuid)
+            
+            ws["terminals"] = terminals_to_keep
+            
+            active_terminal = ws.get("active_terminal")
+            if active_terminal and active_terminal not in terminals_to_keep:
+                log.warning("Active terminal %s for workspace '%s' is not valid; resetting.", active_terminal, ws.get("name"))
+                ws["active_terminal"] = None
+        
+        log.info("Workspace validation complete.")
+        self.save_workspaces()
+        self._build_workspace_list()
 
     def save_workspaces(self):
         """Saves current workspace data to workspaces.json."""
@@ -115,35 +144,50 @@ class WorkspaceManager:
             log.error("Failed to save workspaces file: %s", e)
 
     def reconcile_orphan_tabs(self, all_session_uuids=None):
-        """Finds tabs not assigned to any workspace and moves them to a special workspace."""
+        """
+        Reconciles terminal states with workspaces.
+        - During startup session restore, it cleans up non-existent terminals from workspaces.
+        - During normal operation, it finds newly created terminals (orphans) and assigns
+          them to the "No workspace" group.
+        """
         if all_session_uuids is None:
             all_terminal_uuids = {str(t.uuid) for t in self.guake_app.get_notebook().iter_terminals()}
+            is_startup_restore = False
         else:
             all_terminal_uuids = all_session_uuids
+            is_startup_restore = True
 
-        assigned_regular_uuids = set()
-        for ws in self.workspaces_data.get("workspaces", []):
-            if ws.get('id') != ZERO_UUID:
-                assigned_regular_uuids.update(ws.get("terminals", []))
-
-        orphan_uuids = all_terminal_uuids - assigned_regular_uuids
-
-        zero_workspace = self.get_workspace_by_id(ZERO_UUID)
-        if not zero_workspace:
-            zero_workspace = {
-                "id": ZERO_UUID, "name": "No workspace", "terminals": [],
-                "icon": "❓", "is_pinned": False, "is_special": True,
-            }
-            self.workspaces_data.setdefault("workspaces", []).insert(0, zero_workspace)
-        
-        zero_workspace["terminals"] = list(orphan_uuids)
-        if orphan_uuids:
-            log.info("Found %d orphan tabs. Assigning to 'No workspace'.", len(orphan_uuids))
-
+        # First, clean up any "ghost" terminals from our workspace data that no longer exist.
+        # This is safe to do in both startup and runtime scenarios.
         for ws in self.workspaces_data.get("workspaces", []):
             if ws.get('id') != ZERO_UUID:
                 terminals = ws.get("terminals", [])
                 ws["terminals"] = [tid for tid in terminals if tid in all_terminal_uuids]
+
+        # Only search for and reassign orphans during normal runtime. During startup,
+        # terminals are restored but not yet assigned, so they would all be incorrectly
+        # flagged as orphans.
+        if not is_startup_restore:
+            assigned_regular_uuids = set()
+            for ws in self.workspaces_data.get("workspaces", []):
+                if ws.get('id') != ZERO_UUID:
+                    assigned_regular_uuids.update(ws.get("terminals", []))
+
+            orphan_uuids = all_terminal_uuids - assigned_regular_uuids
+
+            if orphan_uuids:
+                log.info("Found %d orphan tabs. Assigning to 'No workspace'.", len(orphan_uuids))
+                zero_workspace = self.get_workspace_by_id(ZERO_UUID)
+                if not zero_workspace:
+                    zero_workspace = {
+                        "id": ZERO_UUID, "name": "No workspace", "terminals": [],
+                        "icon": "❓", "is_pinned": False, "is_special": True,
+                    }
+                    self.workspaces_data.setdefault("workspaces", []).insert(0, zero_workspace)
+                
+                existing_zero_terminals = set(zero_workspace.get("terminals", []))
+                existing_zero_terminals.update(orphan_uuids)
+                zero_workspace["terminals"] = list(existing_zero_terminals)
 
         self.save_workspaces()
         self._build_workspace_list()
@@ -511,7 +555,13 @@ class WorkspaceManager:
             terminals.pop(idx)
 
             if active_ws.get("active_terminal") == terminal_uuid:
-                active_ws["active_terminal"] = terminals[max(0, idx - 1)] if terminals else None
+                if terminals:
+                    # If the closed tab was the last one, select the new last tab.
+                    # Otherwise, select the tab that is now at the same index.
+                    new_idx = min(idx, len(terminals) - 1)
+                    active_ws["active_terminal"] = terminals[new_idx]
+                else:
+                    active_ws["active_terminal"] = None
             self.save_workspaces()
             self._build_workspace_list()
 
@@ -536,7 +586,14 @@ class WorkspaceManager:
             idx = terminals.index(terminal_uuid)
             terminals.pop(idx)
             if source_ws.get("active_terminal") == terminal_uuid:
-                source_ws["active_terminal"] = terminals[max(0, idx - 1)] if terminals else None
+                if terminals:
+                    # This logic is now consistent with remove_terminal_from_active_workspace.
+                    # It selects the next terminal, or the new last one if the removed
+                    # terminal was the last one, matching the behavior of closing a tab.
+                    new_idx = min(idx, len(terminals) - 1)
+                    source_ws["active_terminal"] = terminals[new_idx]
+                else:
+                    source_ws["active_terminal"] = None
 
             target_ws.setdefault("terminals", []).append(terminal_uuid)
             self.save_workspaces()
