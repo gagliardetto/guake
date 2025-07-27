@@ -479,9 +479,9 @@ class AnimationDrawer:
 
     def draw_guitar_string(self, widget, cr, animation_state=0.0, cpu_load=0.0, **_kwargs):
         """
-        Draws a stylized, oscillating string. The wave's amplitude and complexity
-        increase with CPU load, providing a clear visual representation from calm
-        to agitated states.
+        Draws a sea-like wave that becomes choppier and "hotter" with CPU load.
+        The wave is composed of multiple oscillators to create a fluid, non-blurry
+        motion, transitioning from cool blues to hot reds.
         """
         # Set a dark background
         r = 0x1a / 255.0
@@ -495,51 +495,58 @@ class AnimationDrawer:
 
         t = animation_state * 2 * math.pi
         
-        # Non-linear scaling for CPU load. This gives more sensitivity at lower loads.
-        load_factor = (min(cpu_load, 100.0) / 100.0) ** 0.4
+        # Non-linear scaling for CPU load for more visual impact.
+        load_factor = (min(cpu_load, 100.0) / 100.0) ** 0.5
 
-        # Create a colorful gradient that shifts over time
+        # --- Dynamic Color Palette ---
+        # Interpolate hue from a cool blue (0.6) to a hot red (0.0) based on load.
+        # A second hue is calculated for the gradient.
+        hot_hue = (0.6 - load_factor * 0.6) % 1.0
+        hot_hue2 = (hot_hue + 0.2) % 1.0
+        
         gradient = cairo.LinearGradient(0, 0, width, 0)
-        hue1 = animation_state % 1.0
-        hue2 = (animation_state + 0.5) % 1.0
-        r1, g1, b1 = self._hsl_to_rgb(hue1, 1.0, 0.6)
-        r2, g2, b2 = self._hsl_to_rgb(hue2, 1.0, 0.6)
+        r1, g1, b1 = self._hsl_to_rgb(hot_hue, 1.0, 0.6)
+        r2, g2, b2 = self._hsl_to_rgb(hot_hue2, 1.0, 0.6)
         gradient.add_color_stop_rgba(0, r1, g1, b1, 0.9)
         gradient.add_color_stop_rgba(1, r2, g2, b2, 0.9)
 
         cr.set_source(gradient)
-        # Use a thinner line for a more refined look
-        cr.set_line_width(1.0)
+        cr.set_line_width(1.2)
 
-        # The amplitude now grows significantly with CPU load, creating higher peaks.
-        # It ranges from a calm (height / 5) to an agitated (height / 2) state.
-        dynamic_amplitude = (height / 5) * (1 + 1.5 * load_factor)
+        # --- Sea-like Wave Generation ---
+        # The wave is a sum of several oscillators to create a complex, sea-like effect.
+        # Amplitudes and frequencies are influenced by CPU load.
+        
+        # Base swell of the sea
+        amp1 = height / 4 * (1 + load_factor * 1.5)
+        freq1 = 2.0
+        y1 = math.sin(t + 0 * math.pi / width * freq1) * amp1
 
-        # A decay function that simulates a "pluck" at the start of the animation cycle.
-        decay = math.sin(animation_state * math.pi)
+        # Choppiness on top of the swell
+        amp2 = height / 8 * (1 + load_factor * 2.0)
+        freq2 = 5.0
+        y2 = math.sin(t * 1.5 + 0 * math.pi / width * freq2) * amp2
+
+        # Finer ripples
+        amp3 = height / 20 * (1 + load_factor * 1.0)
+        freq3 = 12.0
+        y3 = math.sin(t * 0.8 + 0 * math.pi / width * freq3) * amp3
 
         cr.move_to(0, height / 2)
         for x in range(int(width)):
-            # Normalized x coordinate [0, 1]
             nx = x / width
-
-            # A simple, calm base wave
-            y_calm = math.sin(nx * 2 * math.pi + t)
-
-            # More complex wave components for the "agitated" state.
-            # Frequencies are reduced to prevent blurring at high load.
-            y_agitated1 = math.sin(nx * 6 * math.pi + t * 1.5)
-            y_agitated2 = math.sin(nx * 10 * math.pi - t * 2.0)
             
-            # Combine agitated components
-            y_agitated = (y_agitated1 * 0.6 + y_agitated2 * 0.4)
-
-            # Blend between the calm and agitated states based on CPU load
-            y = (1.0 - load_factor) * y_calm + load_factor * y_agitated
-
-            # Apply the dynamic amplitude and pluck decay effect
-            final_y = y * dynamic_amplitude * decay
+            # Update each wave component for the current x position
+            y1 = math.sin(t + nx * math.pi * freq1) * amp1
+            y2 = math.sin(t * 1.5 + nx * math.pi * freq2) * amp2
+            y3 = math.sin(t * 0.8 + nx * math.pi * freq3) * amp3
             
-            cr.line_to(x, final_y + height / 2)
+            # Sum the waves to get the final position
+            final_y = (y1 + y2 + y3) / 3.0
+            
+            # Apply a decay envelope to keep the wave contained at the edges
+            edge_decay = math.sin(nx * math.pi) ** 0.5
+            
+            cr.line_to(x, final_y * edge_decay + height / 2)
 
         cr.stroke()
