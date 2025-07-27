@@ -92,6 +92,16 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
     #   https://stackoverflow.com/questions/28465956/
     terminal.context_menu = Gtk.Menu()
     menu = terminal.context_menu
+    
+    customcommands = CustomCommands(settings, callback_object)
+    if customcommands.should_load():
+        submen = customcommands.build_menu()
+        if submen:
+            mi = Gtk.MenuItem(_("Custom Commands"))
+            mi.set_submenu(submen)
+            menu.add(mi)
+            menu.add(Gtk.SeparatorMenuItem())
+
     mi = Gtk.MenuItem(_("Copy"))
     mi.connect("activate", callback_object.on_copy_clipboard)
     menu.add(mi)
@@ -185,14 +195,7 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
     else:
         mi.set_sensitive(False)
     menu.add(mi)
-    customcommands = CustomCommands(settings, callback_object)
-    if customcommands.should_load():
-        submen = customcommands.build_menu()
-        if submen:
-            menu.add(Gtk.SeparatorMenuItem())
-            mi = Gtk.MenuItem(_("Custom Commands"))
-            mi.set_submenu(submen)
-            menu.add(mi)
+
     menu.add(Gtk.SeparatorMenuItem())
     mi = Gtk.ImageMenuItem("gtk-preferences")
     mi.set_use_stock(True)
