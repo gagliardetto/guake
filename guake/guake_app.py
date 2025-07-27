@@ -186,6 +186,7 @@ class Guake(SimpleGladeApp):
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
         self.new_workspace_placeholder = None
+        self.is_starting_up = True
 
         # trayicon!
         img = pixmapfile("guake-tray.png")
@@ -268,6 +269,13 @@ class Guake(SimpleGladeApp):
         self.sidebar_revealer.add(self.workspace_manager.widget)
         self.workspace_manager.widget.show_all()
 
+        # Suppress workspace saving during startup to prevent race conditions.
+        # The original method is restored and called at the end of initialization.
+        original_save_workspaces = self.workspace_manager.save_workspaces
+        def suppressed_save():
+            log.info("Workspace save suppressed during startup.")
+        self.workspace_manager.save_workspaces = suppressed_save
+
         self.update_visual()
         self.window.get_screen().connect("composited-changed", self.update_visual)
 
@@ -337,7 +345,13 @@ class Guake(SimpleGladeApp):
             )
 
         GLib.timeout_add_seconds(1, self.update_tab_activity_indicators)
+        
+        # Restore the original save method and perform a final save with the correct state.
+        self.workspace_manager.save_workspaces = original_save_workspaces
+        self.workspace_manager.save_workspaces()
+        
         log.info("Guake initialized")
+        self.is_starting_up = False
 
     def get_notebook(self):
         return self.notebook_manager.get_current_notebook()
@@ -352,6 +366,12 @@ class Guake(SimpleGladeApp):
 
     def on_tab_switch(self, notebook, page, page_num):
         """Callback for when the active tab is changed."""
+        # Do not update and save the active terminal while a session is being restored
+        # or during the initial application startup sequence. This prevents the saved
+        # active terminal from being overwritten by programmatic tab switches.
+        if self.is_restoring_session or self.is_starting_up:
+            return
+
         terminal = notebook.get_current_terminal()
         if terminal and self.workspace_manager:
             self.workspace_manager.set_active_terminal_for_active_workspace(str(terminal.uuid))

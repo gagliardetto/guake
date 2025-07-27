@@ -460,7 +460,17 @@ class WorkspaceManager:
     def on_workspace_activated(self, listbox, row):
         """Handles the activation of a workspace from the sidebar."""
         workspace_id = row.get_name()
-        if not workspace_id: return
+        if not workspace_id:
+            return
+
+        # If the workspace to be activated is already the active one, do nothing.
+        # This is crucial on startup, where Guake might try to activate the
+        # already-active workspace. Allowing this to proceed calls save_tabs()
+        # (via the decorator) before the UI has restored the correct active
+        # terminal, causing the default (first) terminal to be saved as active,
+        # overwriting the user's session.
+        if self.workspaces_data.get("active_workspace") == workspace_id:
+            return
 
         self.workspaces_data["active_workspace"] = workspace_id
         self.save_workspaces()
