@@ -1272,6 +1272,7 @@ class Guake(SimpleGladeApp):
         self.workspace_manager.workspaces_data["active_workspace"] = target_workspace_id
         self.switch_to_workspace(target_workspace_id)
         # trigger sidebar update
+        self.workspace_manager.update_workspace_list_selection(target_workspace_id)
         self.update_active_workspace_indicator()
 
     def update_tab_activity_indicators(self):
