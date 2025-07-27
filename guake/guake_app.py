@@ -1258,10 +1258,19 @@ class Guake(SimpleGladeApp):
 
     @save_tabs_when_changed
     def on_send_terminal_to_workspace(self, menu_item, terminal_uuid, target_workspace_id):
-        log.debug("Sending terminal %s to workspace %s", terminal_uuid, target_workspace_id)
+        log.info("Sending terminal %s to workspace %s", terminal_uuid, target_workspace_id)
         self.workspace_manager.move_terminal_to_workspace(terminal_uuid, target_workspace_id)
-        active_ws_id = self.workspace_manager.workspaces_data.get("active_workspace")
-        self.switch_to_workspace(active_ws_id)
+        # hide the tab in the current workspace
+        current_notebook = self.notebook_manager.get_current_notebook()
+        current_page = current_notebook.get_current_page()
+        current_page_widget = current_notebook.get_nth_page(current_page)
+        if current_page_widget:
+            current_page_widget.hide()
+        # Switch to the target workspace
+        self.workspace_manager.workspaces_data["active_workspace"] = target_workspace_id
+        self.switch_to_workspace(target_workspace_id)
+        # trigger sidebar update
+        self.update_active_workspace_indicator()
 
     def update_tab_activity_indicators(self):
         notebook = self.get_notebook()

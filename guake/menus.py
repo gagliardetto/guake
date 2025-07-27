@@ -45,6 +45,7 @@ def mk_tab_context_menu(callback_object):
             terminals = page.get_terminals()
             if terminals:
                 terminal_uuid = str(terminals[0].uuid)
+                log.info("Moving terminal %s to workspace", terminal_uuid)
                 move_to_ws_item.connect("activate", guake.on_populate_move_to_workspace_menu, submenu, terminal_uuid)
 
     menu.show_all()
