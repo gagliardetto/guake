@@ -228,7 +228,7 @@ class MyListBoxRow(Gtk.ListBoxRow):
 
         # Set initial text with default styling
         self.update_highlighting(None)
-        self.ws_label.set_markup(f"<span foreground='gray'>{self.workspace_name}</span>")
+        self.ws_label.set_markup(f"<span foreground='gray'>{GLib.markup_escape_text(self.workspace_name)}</span>")
 
         # Attach widgets to the grid layout
         grid.attach(self.label, 0, 0, 1, 1)      # (child, col, row, width, height)
@@ -397,7 +397,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
                 self.list_box.select_row(self.visible_rows[0])
                 self.list_box.grab_focus()
         elif event.keyval == Gdk.KEY_Escape:
-            self.emit("close-view")
+            self.response(Gtk.ResponseType.CANCEL)
 
 class NewWorkspacePlaceholder(Gtk.Box):
     def __init__(self, guake_app, workspace_id):
