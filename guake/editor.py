@@ -545,10 +545,25 @@ class TextEditorDialog(Gtk.Dialog):
         self.buffer.set_text(text)
 
     def get_final_content(self):
-        """Returns the current text content of the editor buffer."""
+        """
+        Returns the current text content of the editor buffer, with unescaped
+        newlines escaped so the entire content can be run as a single shell command.
+        """
         start_iter = self.buffer.get_start_iter()
         end_iter = self.buffer.get_end_iter()
-        return self.buffer.get_text(start_iter, end_iter, True)
+        text = self.buffer.get_text(start_iter, end_iter, True)
+
+        # A single trailing newline is often just for file formatting, so we remove it
+        # to avoid a dangling line-continuation character at the end of the command.
+        if text.endswith('\n'):
+            text = text[:-1]
+
+        # Replace any newline that isn't already escaped with a backslash
+        # to create a single, multi-line shell command.
+        # The replacement is ' \\\n' which is the standard way to continue a line.
+        escaped_text = re.sub(r'(?<!\\)\n', r' \\\n', text)
+        
+        return escaped_text
 
     def compile_keymap(self):
         new_keymap = {}
