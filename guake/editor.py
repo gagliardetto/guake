@@ -4,7 +4,8 @@ from collections import OrderedDict
 import logging
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GObject, Gtk, Gdk, GLib, Pango
+gi.require_version("GtkSource", "4")
+from gi.repository import GObject, Gtk, Gdk, GLib, Pango, GtkSource
 
 # ############################################################################
 # Helper class for detecting and converting between different casing conventions
@@ -473,10 +474,26 @@ class TextEditorDialog(Gtk.Dialog):
         scrolled_window.set_vexpand(True)
         self.get_content_area().add(scrolled_window)
 
-        self.view = Gtk.TextView()
-        self.buffer = self.view.get_buffer()
-        # self.buffer.set_enable_undo(False)
-        self.doc = self.buffer # Alias for compatibility with inspiration code
+        # Use GtkSource.View for syntax highlighting
+        self.buffer = GtkSource.Buffer()
+        self.view = GtkSource.View.new_with_buffer(self.buffer)
+        self.view.set_show_line_numbers(True)
+        self.view.set_auto_indent(True)
+        self.view.set_highlight_current_line(True)
+        
+        # Set the language for Bash syntax highlighting
+        lang_manager = GtkSource.LanguageManager.get_default()
+        language = lang_manager.get_language('sh') # 'sh' is the id for shell scripts
+        if language:
+            self.buffer.set_language(language)
+
+        # Set a style scheme
+        scheme_manager = GtkSource.StyleSchemeManager.get_default()
+        scheme = scheme_manager.get_scheme('classic') # Or any other available scheme
+        if scheme:
+            self.buffer.set_style_scheme(scheme)
+
+        self.doc = self.buffer # Alias for compatibility
         scrolled_window.add(self.view)
 
         # -- Undo/Redo Manager --
