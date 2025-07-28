@@ -652,8 +652,24 @@ class TextEditorDialog(Gtk.Dialog):
         text = self.get_raw_content()
         if text.endswith('\n'):
             text = text[:-1]
-        escaped_text = re.sub(r'(?<!\\)\n', r' \\\n', text)
-        return escaped_text
+        
+        parts = re.split(r"('.*?')", text)
+        result_parts = []
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                sub_lines = part.split('\n')
+                escaped_sub_lines = []
+                for j, sub_line in enumerate(sub_lines):
+                    is_last_segment = (i == len(parts) - 1) and (j == len(sub_lines) - 1)
+                    if sub_line.rstrip().endswith('\\') or is_last_segment:
+                        escaped_sub_lines.append(sub_line)
+                    else:
+                        escaped_sub_lines.append(sub_line + " \\")
+                result_parts.append('\n'.join(escaped_sub_lines))
+            else:
+                result_parts.append(part)
+        
+        return "".join(result_parts)
 
     def insert_at_cursor(self, text):
         """
