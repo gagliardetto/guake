@@ -325,7 +325,8 @@ class MultiCursorUndoAction(UndoAction):
         selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
         self.primary_before = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
                                selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
-        self.secondary_before = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
+        # Use a dictionary to map cursor objects to their state for robustness
+        self.secondary_before = {c: (c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors}
 
     def add(self, action):
         self.actions.append(action)
@@ -336,7 +337,8 @@ class MultiCursorUndoAction(UndoAction):
         selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
         self.primary_after = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
                               selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
-        self.secondary_after = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
+        # Use a dictionary to map cursor objects to their state for robustness
+        self.secondary_after = {c: (c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors}
 
     def undo(self):
         for action in reversed(self.actions):
@@ -348,10 +350,12 @@ class MultiCursorUndoAction(UndoAction):
         self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
         self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
 
-        for i, cursor in enumerate(self.dialog.cursors):
-            start_iter = self.dialog.doc.get_iter_at_offset(self.secondary_before[i][0])
-            end_iter = self.dialog.doc.get_iter_at_offset(self.secondary_before[i][1])
-            cursor.tag.move_marks(start_iter, end_iter)
+        # Restore secondary cursors from the dictionary
+        for cursor, (start_offset, end_offset) in self.secondary_before.items():
+            if cursor in self.dialog.cursors: # Check if cursor still exists
+                start_iter = self.dialog.doc.get_iter_at_offset(start_offset)
+                end_iter = self.dialog.doc.get_iter_at_offset(end_offset)
+                cursor.tag.move_marks(start_iter, end_iter)
         
         self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
 
@@ -365,10 +369,12 @@ class MultiCursorUndoAction(UndoAction):
         self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
         self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
 
-        for i, cursor in enumerate(self.dialog.cursors):
-            start_iter = self.dialog.doc.get_iter_at_offset(self.secondary_after[i][0])
-            end_iter = self.dialog.doc.get_iter_at_offset(self.secondary_after[i][1])
-            cursor.tag.move_marks(start_iter, end_iter)
+        # Restore secondary cursors from the dictionary
+        for cursor, (start_offset, end_offset) in self.secondary_after.items():
+            if cursor in self.dialog.cursors: # Check if cursor still exists
+                start_iter = self.dialog.doc.get_iter_at_offset(start_offset)
+                end_iter = self.dialog.doc.get_iter_at_offset(end_offset)
+                cursor.tag.move_marks(start_iter, end_iter)
             
         self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
 
