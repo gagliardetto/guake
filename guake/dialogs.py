@@ -213,18 +213,21 @@ class MyListBoxRow(Gtk.ListBoxRow):
 
         # Tab Label (Primary Info) - styled with Pango markup
         label = Gtk.Label()
-        label.set_markup(f"<b>{self.tab_label_text}</b>")
+        # Use a larger font size for the main label
+        label.set_markup(f"<span size='large'><b>{self.tab_label_text}</b></span>")
         label.set_xalign(0)
         label.set_hexpand(True)
 
         # Workspace Label (Secondary Info, right-aligned)
         ws_label = Gtk.Label()
-        ws_label.set_markup(f"<small>{self.workspace_name}</small>")
+        # Use default font size for the workspace name
+        ws_label.set_markup(f"{self.workspace_name}")
         ws_label.set_xalign(1)
 
         # CWD Label (Tertiary Info) - smaller and italicized
         cwd_label = Gtk.Label()
-        cwd_label.set_markup(f"<small><i>{self.tab_cwd_text}</i></small>")
+        # Use default font size for the CWD
+        cwd_label.set_markup(f"<i>{self.tab_cwd_text}</i>")
         cwd_label.set_xalign(0)
         cwd_label.set_hexpand(True)
         cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
