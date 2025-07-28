@@ -606,7 +606,12 @@ class TextEditorDialog(Gtk.Dialog):
         self._hook_view_handlers()
         
         self.update_undo_redo_sensitivity()
+        self.connect("destroy", self.on_destroy)
         self.show_all()
+
+    def on_destroy(self, widget):
+        if self.ai_chat_window:
+            self.ai_chat_window.destroy()
 
     def toggle_ai_window(self, widget):
         if self.ai_chat_window is None and self.ai_handler and AI_AVAILABLE:
@@ -906,3 +911,4 @@ class TextEditorDialog(Gtk.Dialog):
             
     def mc_paste_clipboard(self, view):
         self._handled_paste = True
+
