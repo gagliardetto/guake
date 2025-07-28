@@ -2,7 +2,7 @@ import gi
 import re
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
@@ -212,32 +212,48 @@ class MyListBoxRow(Gtk.ListBoxRow):
         grid.set_margin_bottom(8)
 
         # Tab Label (Primary Info) - styled with Pango markup
-        label = Gtk.Label()
-        # Use a larger font size for the main label
-        label.set_markup(f"<span size='large'><b>{self.tab_label_text}</b></span>")
-        label.set_xalign(0)
-        label.set_hexpand(True)
+        self.label = Gtk.Label()
+        self.label.set_xalign(0)
+        self.label.set_hexpand(True)
 
         # Workspace Label (Secondary Info, right-aligned)
-        ws_label = Gtk.Label()
-        # Use default font size for the workspace name
-        ws_label.set_markup(f"{self.workspace_name}")
-        ws_label.set_xalign(1)
+        self.ws_label = Gtk.Label()
+        self.ws_label.set_xalign(1)
 
         # CWD Label (Tertiary Info) - smaller and italicized
-        cwd_label = Gtk.Label()
-        # Use default font size for the CWD
-        cwd_label.set_markup(f"<i>{self.tab_cwd_text}</i>")
-        cwd_label.set_xalign(0)
-        cwd_label.set_hexpand(True)
-        cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
+        self.cwd_label = Gtk.Label()
+        self.cwd_label.set_xalign(0)
+        self.cwd_label.set_hexpand(True)
+        self.cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
+
+        self.update_highlighting(None)
+        self.ws_label.set_markup(f"{self.workspace_name}")
+
 
         # Attach widgets to the grid layout
-        grid.attach(label, 0, 0, 1, 1)      # (child, col, row, width, height)
-        grid.attach(ws_label, 1, 0, 1, 1)
-        grid.attach(cwd_label, 0, 1, 2, 1)  # CWD spans both columns on the second row
+        grid.attach(self.label, 0, 0, 1, 1)      # (child, col, row, width, height)
+        grid.attach(self.ws_label, 1, 0, 1, 1)
+        grid.attach(self.cwd_label, 0, 1, 2, 1)  # CWD spans both columns on the second row
 
         self.add(grid)
+
+    def update_highlighting(self, filter_text):
+        """Updates the Pango markup to highlight text matching the filter."""
+        def highlight(text, is_bold=False):
+            escaped_original = GLib.markup_escape_text(text)
+            if not filter_text:
+                return f"<b>{escaped_original}</b>" if is_bold else escaped_original
+
+            # Underline the matching text
+            highlighted = re.sub(f'({re.escape(filter_text)})',
+                                 r'<u>\1</u>',
+                                 escaped_original,
+                                 flags=re.IGNORECASE)
+            return f"<b>{highlighted}</b>" if is_bold else highlighted
+
+        self.label.set_markup(f"<span size='large'>{highlight(self.tab_label_text, is_bold=True)}</span>")
+        self.cwd_label.set_markup(f"<i>{highlight(self.tab_cwd_text)}</i>")
+
 
 class QuickTabNavigationDialog(Gtk.Dialog):
     def __init__(self, window, notebook_manager, workspace_manager):
@@ -254,6 +270,7 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.entry = Gtk.Entry()
         self.list_box = Gtk.ListBox()
         self.selected_item = None
+        self.count_label = Gtk.Label()
 
         screen = Gdk.Screen.get_default()
         screen_width = screen.get_width()
@@ -275,8 +292,12 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.entry.set_placeholder_text("Search or filter tabs (w:workspace)...")
         self.entry.set_hexpand(True)
 
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header_box.pack_start(self.entry, True, True, 0)
+        header_box.pack_start(self.count_label, False, False, 0)
+
         box = self.get_content_area()
-        box.add(self.entry)
+        box.add(header_box)
         box.add(scrolled_window)
 
         self.entry.connect("changed", self.on_entry_changed)
@@ -327,14 +348,19 @@ class QuickTabNavigationDialog(Gtk.Dialog):
             ws_match = not ws_filter or ws_filter in ws_text
             text_match = not text_filter or text_filter in label_text or text_filter in cwd_text
 
-            if ws_match and text_match:
-                row.show()
-            else:
-                row.hide()
+            is_visible = ws_match and text_match
+            row.set_visible(is_visible)
+            
+            # Update highlighting based on the text filter for visible rows
+            row.update_highlighting(text_filter if is_visible else None)
+
         self.update_visible_rows()
 
     def update_visible_rows(self):
         self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
+        total_rows = len(self.list_box.get_children())
+        visible_count = len(self.visible_rows)
+        self.count_label.set_markup(f"<small>{visible_count}/{total_rows}</small>")
         
     def on_key_press_on_row(self, widget, event):
         selected_row = self.list_box.get_selected_row()
