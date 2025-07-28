@@ -164,6 +164,9 @@ class GuakeTerminal(Vte.Terminal):
         if command[-1] != "\n":
             command += "\n"
         self.feed_child(command)
+    def clear_input(self):
+        """Clear the input area of the terminal so it is ready for new input."""
+        # TODO: implement a method to clear the input area.
 
     def copy_clipboard(self):
         if self.get_has_selection():

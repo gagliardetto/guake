@@ -46,6 +46,13 @@ class TerminalContextMenuCallbacks:
     def on_dialog_response(self, dialog, response_id):
         if response_id == Gtk.ResponseType.OK:
             print("Final Content (escaped):\n", dialog.get_escaped_content())
+            print("Final Content (raw):\n", dialog.get_raw_content())
+            # Here you can handle the final content, e.g., save it or process it
+            # For example, you might want to run the content in the terminal:
+            self.terminal.clear_input()
+            self.terminal.execute_command(dialog.get_raw_content())
+        elif response_id == Gtk.ResponseType.CANCEL:
+            print("Editor closed without saving changes.")
         else:
             print("Editor closed without running.")
         dialog.destroy() # This will also trigger the on_destroy handler
