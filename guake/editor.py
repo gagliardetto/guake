@@ -1,6 +1,7 @@
 import gi
 import re
 from collections import OrderedDict
+import logging
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import GObject, Gtk, Gdk, GLib, Pango
@@ -258,6 +259,117 @@ class Cursor:
             self.line_offset = None
 
 # ############################################################################
+# Undo/Redo Action Classes
+# ############################################################################
+class UndoAction:
+    """Base class for an undoable action."""
+    def undo(self): pass
+    def redo(self): pass
+
+class InsertAction(UndoAction):
+    """Action for inserting text."""
+    def __init__(self, buffer, offset, text):
+        self.buffer = buffer
+        self.offset = offset
+        self.text = text
+
+    def undo(self):
+        start = self.buffer.get_iter_at_offset(self.offset)
+        end = self.buffer.get_iter_at_offset(self.offset + len(self.text))
+        self.buffer.delete(start, end)
+
+    def redo(self):
+        start = self.buffer.get_iter_at_offset(self.offset)
+        self.buffer.insert(start, self.text)
+
+class DeleteAction(UndoAction):
+    """Action for deleting text."""
+    def __init__(self, buffer, offset, text):
+        self.buffer = buffer
+        self.offset = offset
+        self.text = text
+
+    def undo(self):
+        start = self.buffer.get_iter_at_offset(self.offset)
+        self.buffer.insert(start, self.text)
+
+    def redo(self):
+        start = self.buffer.get_iter_at_offset(self.offset)
+        end = self.buffer.get_iter_at_offset(self.offset + len(self.text))
+        self.buffer.delete(start, end)
+
+class CompositeAction(UndoAction):
+    """A collection of actions to be treated as a single undo/redo step."""
+    def __init__(self):
+        self.actions = []
+
+    def add(self, action):
+        self.actions.append(action)
+
+    def undo(self):
+        for action in reversed(self.actions):
+            action.undo()
+
+    def redo(self):
+        for action in self.actions:
+            action.redo()
+
+# ############################################################################
+# Undo/Redo Manager
+# ############################################################################
+class UndoManager:
+    """Manages the undo/redo stack for a Gtk.TextBuffer."""
+    def __init__(self, buffer):
+        self.buffer = buffer
+        self.undo_stack = []
+        self.redo_stack = []
+        self.undo_lock = False
+        self.current_action_group = None
+
+        self.buffer.connect("begin-user-action", self._on_begin_user_action)
+        self.buffer.connect_after("end-user-action", self._on_end_user_action)
+        self.buffer.connect("insert-text", self._on_insert_text)
+        self.buffer.connect("delete-range", self._on_delete_range)
+
+    def _on_begin_user_action(self, buf):
+        if self.undo_lock: return
+        self.current_action_group = CompositeAction()
+
+    def _on_end_user_action(self, buf):
+        if self.undo_lock: return
+        if self.current_action_group and self.current_action_group.actions:
+            self.undo_stack.append(self.current_action_group)
+            self.redo_stack.clear()
+        self.current_action_group = None
+
+    def _on_insert_text(self, buf, iter, text, length):
+        if self.undo_lock or self.current_action_group is None: return
+        action = InsertAction(self.buffer, iter.get_offset(), text)
+        self.current_action_group.add(action)
+
+    def _on_delete_range(self, buf, start_iter, end_iter):
+        if self.undo_lock or self.current_action_group is None: return
+        text = self.buffer.get_text(start_iter, end_iter, False)
+        action = DeleteAction(self.buffer, start_iter.get_offset(), text)
+        self.current_action_group.add(action)
+
+    def undo(self):
+        if not self.undo_stack: return
+        action = self.undo_stack.pop()
+        self.undo_lock = True
+        action.undo()
+        self.undo_lock = False
+        self.redo_stack.append(action)
+
+    def redo(self):
+        if not self.redo_stack: return
+        action = self.redo_stack.pop()
+        self.undo_lock = True
+        action.redo()
+        self.undo_lock = False
+        self.undo_stack.append(action)
+
+# ############################################################################
 # Main Editor Dialog
 # ############################################################################
 class TextEditorDialog(Gtk.Dialog):
@@ -270,6 +382,9 @@ class TextEditorDialog(Gtk.Dialog):
         self.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
         self.set_default_size(800, 600)
 
+        # -- Logging Setup --
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
         # -- Editor Setup --
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_hexpand(True)
@@ -280,6 +395,9 @@ class TextEditorDialog(Gtk.Dialog):
         self.buffer = self.view.get_buffer()
         self.doc = self.buffer # Alias for compatibility with inspiration code
         scrolled_window.add(self.view)
+
+        # -- Undo/Redo Manager --
+        self.undo_manager = UndoManager(self.buffer)
 
         # -- Feature Implementation --
         self._handlers = []
@@ -298,11 +416,22 @@ class TextEditorDialog(Gtk.Dialog):
             '<Primary>u': self.unmatch_cursor,
             '<Primary>Up': self.column_select_up,
             '<Primary>Down': self.column_select_down,
-            'Escape': self.clear_cursors
+            'Escape': self.clear_cursors,
+            '<Primary>z': self.undo,
+            '<Primary>y': self.redo,
+            '<Primary><Shift>z': self.redo,
         }
         self.compile_keymap()
         self._hook_view_handlers()
         self.show_all()
+
+    def undo(self):
+        """Undoes the last user action."""
+        self.undo_manager.undo()
+
+    def redo(self):
+        """Redoes the last undone user action."""
+        self.undo_manager.redo()
 
     def set_text(self, text):
         """
