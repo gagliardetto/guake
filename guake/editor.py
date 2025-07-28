@@ -541,7 +541,7 @@ class TextEditorDialog(Gtk.Dialog):
         toolbar.insert(Gtk.SeparatorToolItem(), -1)
 
         format_button = Gtk.ToolButton.new(None, "Format")
-        format_button.set_icon_name("edit-indent-symbolic")
+        format_button.set_icon_name("format-indent-more")
         format_button.connect("clicked", self.format_content)
         toolbar.insert(format_button, -1)
 
