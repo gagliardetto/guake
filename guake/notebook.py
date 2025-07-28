@@ -742,7 +742,12 @@ class TerminalNotebook(Gtk.Notebook):
         return self.get_tab_label(self.get_nth_page(index)).get_text()
 
     def get_tab_text_page(self, page):
-        return self.get_tab_label(page).get_text()
+        # return self.get_tab_label(page).get_text()
+        # if not nonetype
+        tab_label = self.get_tab_label(page)
+        if tab_label is not None:
+            return tab_label.get_text()
+        return ""
 
     def on_show_preferences(self, user_data):
         self.guake.hide()

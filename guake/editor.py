@@ -3,6 +3,7 @@ import re
 from collections import OrderedDict
 import logging
 import shlex
+import subprocess
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("GtkSource", "4")
@@ -539,6 +540,13 @@ class TextEditorDialog(Gtk.Dialog):
         
         toolbar.insert(Gtk.SeparatorToolItem(), -1)
 
+        format_button = Gtk.ToolButton.new(None, "Format")
+        format_button.set_icon_name("edit-indent-symbolic")
+        format_button.connect("clicked", self.format_content)
+        toolbar.insert(format_button, -1)
+
+        toolbar.insert(Gtk.SeparatorToolItem(), -1)
+
         ask_ai_button = Gtk.ToolButton.new(None, "Ask AI")
         ask_ai_button.set_icon_name("view-reveal-symbolic")
         ask_ai_button.connect("clicked", self.toggle_ai_window)
@@ -602,6 +610,7 @@ class TextEditorDialog(Gtk.Dialog):
             '<Primary>z': self.undo,
             '<Primary>y': self.redo,
             '<Primary><Shift>z': self.redo,
+            '<Primary>i': self.format_content,
         }
         self.compile_keymap()
         self._hook_view_handlers()
@@ -695,6 +704,31 @@ class TextEditorDialog(Gtk.Dialog):
 
         self.buffer.end_user_action()
         self._is_modifying_programmatically = False
+
+    def format_content(self, widget=None):
+        """Formats the entire buffer content using an external tool (shfmt)."""
+        try:
+            original_content = self.get_raw_content()
+            # Use shfmt to format the code. The '-i 2' flag sets indentation to 2 spaces.
+            # The '-s' flag simplifies the code where possible.
+            process = subprocess.run(
+                ['shfmt', '-i', '2', '-s'],
+                input=original_content,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            formatted_content = process.stdout
+            
+            # Replace the entire buffer content in a single undoable action
+            self.buffer.begin_user_action()
+            self.buffer.set_text(formatted_content)
+            self.buffer.end_user_action()
+
+        except FileNotFoundError:
+            logging.error("The 'shfmt' command is not installed or not in your PATH.")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Error while formatting: {e.stderr}")
 
     def compile_keymap(self):
         new_keymap = {}
