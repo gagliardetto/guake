@@ -210,47 +210,38 @@ class Cursor:
             self.tag.do_move_marks()
 
     def move(self, step_size, count, extend_selection):
+        # Get original positions
         start_iter = self.tag.get_start_iter()
         end_iter = self.tag.get_end_iter()
 
-        if (extend_selection):
-            # This part seems fine and is not the subject of the request.
-            sel_start = self.doc.get_iter_at_mark(self.doc.get_insert())
-            sel_end = self.doc.get_iter_at_mark(self.doc.get_selection_bound())
-            sel_delta = sel_start.get_offset() - sel_end.get_offset()
-            move_end = (count > 0)
-            if (sel_delta != 0):
-                move_end = (sel_delta > 0)
-            if (move_end):
-                self.move_iter(end_iter, step_size, count)
-            else:
+        if extend_selection:
+            # A simple, robust assumption: moving left extends from the start,
+            # and moving right extends from the end.
+            if count < 0: # Moving left
                 self.move_iter(start_iter, step_size, count)
-        
-        elif (start_iter.get_offset() != end_iter.get_offset()):
-            # This is a non-extending move on an existing selection.
-            # First, collapse the selection.
-            if (count < 0):
-                # Move left: collapse to the start of the selection.
-                end_iter = start_iter.copy()
-            else:
-                # Move right: collapse to the end of the selection.
-                start_iter = end_iter.copy()
+            else: # Moving right
+                self.move_iter(end_iter, step_size, count)
             
-            # Now, move the collapsed cursor.
-            # Both iters are at the same position.
-            self.move_iter(start_iter, step_size, count)
-            self.move_iter(end_iter, step_size, count)
+            self.tag.move_marks(start_iter, end_iter)
 
-        else:
-            # This is a non-extending move on a caret (no selection).
-            # Just move the caret.
-            self.move_iter(start_iter, step_size, count)
-            self.move_iter(end_iter, step_size, count)
+        else: # Not extending selection (collapsing or moving caret)
+            has_selection = start_iter.get_offset() != end_iter.get_offset()
+            
+            # Determine the target position after collapse/move
+            new_pos = None
+            if count < 0: # Moving left
+                new_pos = start_iter.copy() # Collapse to start
+            else: # Moving right
+                new_pos = end_iter.copy() # Collapse to end
+            
+            # If there was no selection to collapse, then we actually move the caret.
+            if not has_selection:
+                 self.move_iter(new_pos, step_size, count)
 
-        self.tag.move_marks(start_iter, end_iter)
+            self.tag.move_marks(new_pos, new_pos)
 
     def move_iter(self, pos, step_size, count):
-        if step_size == Gtk.MovementStep.LOGICAL_POSITIONS:
+        if step_size == Gtk.MovementStep.VISUAL_POSITIONS:
             pos.backward_cursor_positions(-count) if count < 0 else pos.forward_cursor_positions(count)
         elif step_size == Gtk.MovementStep.WORDS:
             for _ in range(abs(count)):
