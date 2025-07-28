@@ -198,31 +198,43 @@ class MyListBoxRow(Gtk.ListBoxRow):
         self.page_index = page_index
         self.workspace_id = workspace_id
         self.workspace_name = workspace_name
+        # Store the text for filtering to make it independent of the widget hierarchy
+        self.tab_label_text = tab_label
+        self.tab_cwd_text = tab_cwd
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        box.set_margin_start(20)
-        box.set_margin_end(20)
+        # Use a Grid for a more structured and organized layout
+        grid = Gtk.Grid()
+        grid.set_column_spacing(15)
+        grid.set_row_spacing(2)
+        grid.set_margin_start(10)
+        grid.set_margin_end(10)
+        grid.set_margin_top(8)
+        grid.set_margin_bottom(8)
 
+        # Tab Label (Primary Info) - styled with Pango markup
         label = Gtk.Label()
-        label.set_markup(f"<span font_desc='Iosevka, Arial, Helvetica, sans-serif Bold 15'>{tab_label}</span>")
+        label.set_markup(f"<b>{self.tab_label_text}</b>")
         label.set_xalign(0)
-        
+        label.set_hexpand(True)
+
+        # Workspace Label (Secondary Info, right-aligned)
         ws_label = Gtk.Label()
-        ws_label.set_markup(f"<small>{workspace_name}</small>")
-        ws_label.set_xalign(0)
-        ws_label.set_size_request(150, -1)
+        ws_label.set_markup(f"<small>{self.workspace_name}</small>")
+        ws_label.set_xalign(1)
 
-        cwd = Gtk.Label()
-        cwd.set_markup(f"<span font_desc='Iosevka Term, Arial, Helvetica, sans-serif 15'>{tab_cwd}</span>")
-        cwd.set_xalign(1)
-        cwd.set_hexpand(True)
-        cwd.set_ellipsize(Pango.EllipsizeMode.START)
+        # CWD Label (Tertiary Info) - smaller and italicized
+        cwd_label = Gtk.Label()
+        cwd_label.set_markup(f"<small><i>{self.tab_cwd_text}</i></small>")
+        cwd_label.set_xalign(0)
+        cwd_label.set_hexpand(True)
+        cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
 
-        box.pack_start(label, True, True, 0)
-        box.pack_start(ws_label, False, False, 0)
-        box.pack_start(cwd, True, True, 0)
+        # Attach widgets to the grid layout
+        grid.attach(label, 0, 0, 1, 1)      # (child, col, row, width, height)
+        grid.attach(ws_label, 1, 0, 1, 1)
+        grid.attach(cwd_label, 0, 1, 2, 1)  # CWD spans both columns on the second row
 
-        self.add(box)
+        self.add(grid)
 
 class QuickTabNavigationDialog(Gtk.Dialog):
     def __init__(self, window, notebook_manager, workspace_manager):
@@ -304,10 +316,9 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         text_filter = re.sub(r'w:\S*\s*', '', full_filter_text).strip()
 
         for row in self.list_box.get_children():
-            hbox = row.get_child()
-            label, ws_label, cwd = hbox.get_children()
-            label_text = label.get_text().lower()
-            cwd_text = cwd.get_text().lower()
+            # Filter using the stored text attributes on the row object for robustness
+            label_text = row.tab_label_text.lower()
+            cwd_text = row.tab_cwd_text.lower()
             ws_text = row.workspace_name.lower()
 
             ws_match = not ws_filter or ws_filter in ws_text
