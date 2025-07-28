@@ -530,11 +530,13 @@ class TextEditorDialog(Gtk.Dialog):
         
         self.undo_button = Gtk.ToolButton.new(None, "Undo")
         self.undo_button.set_icon_name("edit-undo-symbolic")
+        self.undo_button.set_tooltip_text("Undo the last action")
         self.undo_button.connect("clicked", self.undo)
         toolbar.insert(self.undo_button, -1)
 
         self.redo_button = Gtk.ToolButton.new(None, "Redo")
         self.redo_button.set_icon_name("edit-redo-symbolic")
+        self.redo_button.set_tooltip_text("Redo the last undone action")
         self.redo_button.connect("clicked", self.redo)
         toolbar.insert(self.redo_button, -1)
         
@@ -542,6 +544,7 @@ class TextEditorDialog(Gtk.Dialog):
 
         format_button = Gtk.ToolButton.new(None, "Format")
         format_button.set_icon_name("format-indent-more")
+        format_button.set_tooltip_text("Format the content of the editor")
         format_button.connect("clicked", self.format_content)
         toolbar.insert(format_button, -1)
 
@@ -549,6 +552,9 @@ class TextEditorDialog(Gtk.Dialog):
 
         ask_ai_button = Gtk.ToolButton.new(None, "Ask AI")
         ask_ai_button.set_icon_name("view-reveal-symbolic")
+        ask_ai_button.set_tooltip_text("Ask AI for help with the content")
+        if not AI_AVAILABLE:
+            ask_ai_button.set_tooltip_text("AI features are not available.")
         ask_ai_button.connect("clicked", self.toggle_ai_window)
         toolbar.insert(ask_ai_button, -1)
         if not self.ai_handler:
@@ -565,6 +571,10 @@ class TextEditorDialog(Gtk.Dialog):
         self.view.set_show_line_numbers(True)
         self.view.set_auto_indent(True)
         self.view.set_highlight_current_line(True)
+        
+        # Set a larger, monospace font
+        font_desc = Pango.FontDescription("Monospace 12")
+        self.view.override_font(font_desc)
         
         lang_manager = GtkSource.LanguageManager.get_default()
         language = lang_manager.get_language('sh')
