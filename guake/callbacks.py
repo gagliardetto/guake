@@ -61,7 +61,7 @@ class TerminalContextMenuCallbacks:
         # if the user clicked OK, save the changes
         elif response == Gtk.ResponseType.OK:
             # Save changes back to the terminal
-            new_content = dialog.get_final_content()
+            new_content = dialog.get_escaped_content()
             log.info("New command to run: %s", new_content)
         # if the user clicked CLOSE, just close the dialog without saving
         elif response == Gtk.ResponseType.CLOSE:

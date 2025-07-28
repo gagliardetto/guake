@@ -414,6 +414,9 @@ class UndoManager:
 
             self.undo_stack.append(self.current_action_group)
             self.redo_stack.clear()
+            # Notify editor to update sensitivity
+            if self.editor:
+                self.editor.update_undo_redo_sensitivity()
         self.current_action_group = None
 
     def _on_insert_text(self, buf, iter, text, length):
@@ -428,20 +431,22 @@ class UndoManager:
         self.current_action_group.add(action)
 
     def undo(self):
-        if not self.undo_stack: return
+        if not self.undo_stack: return False
         action = self.undo_stack.pop()
         self.undo_lock = True
         action.undo()
         self.undo_lock = False
         self.redo_stack.append(action)
+        return True
 
     def redo(self):
-        if not self.redo_stack: return
+        if not self.redo_stack: return False
         action = self.redo_stack.pop()
         self.undo_lock = True
         action.redo()
         self.undo_lock = False
         self.undo_stack.append(action)
+        return True
 
 # ############################################################################
 # Main Editor Dialog
@@ -449,7 +454,7 @@ class UndoManager:
 class TextEditorDialog(Gtk.Dialog):
     def __init__(self, parent=None):
         super().__init__(
-            title="Command Editor",
+            title="Text Editor",
             parent=parent,
             flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
         )
@@ -472,12 +477,47 @@ class TextEditorDialog(Gtk.Dialog):
 
         # -- Logging Setup --
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        
+        # Main layout box
+        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.get_content_area().add(main_vbox)
+
+        # -- Toolbar --
+        toolbar = Gtk.Toolbar()
+        main_vbox.pack_start(toolbar, False, False, 0)
+        
+        # Undo button
+        self.undo_button = Gtk.ToolButton.new(None, "Undo")
+        self.undo_button.set_icon_name("edit-undo-symbolic")
+        self.undo_button.connect("clicked", self.undo)
+        toolbar.insert(self.undo_button, -1)
+
+        # Redo button
+        self.redo_button = Gtk.ToolButton.new(None, "Redo")
+        self.redo_button.set_icon_name("edit-redo-symbolic")
+        self.redo_button.connect("clicked", self.redo)
+        toolbar.insert(self.redo_button, -1)
+        
+        toolbar.insert(Gtk.SeparatorToolItem(), -1)
+
+        # AI Prompt Entry
+        ai_prompt_entry_item = Gtk.ToolItem()
+        self.ai_prompt_entry = Gtk.Entry()
+        self.ai_prompt_entry.set_placeholder_text("Enter AI prompt...")
+        ai_prompt_entry_item.add(self.ai_prompt_entry)
+        toolbar.insert(ai_prompt_entry_item, -1)
+
+        # Ask AI button
+        ask_ai_button = Gtk.ToolButton.new(None, "Ask AI")
+        ask_ai_button.set_icon_name("system-search-symbolic")
+        ask_ai_button.connect("clicked", self.on_ask_ai)
+        toolbar.insert(ask_ai_button, -1)
 
         # -- Editor Setup --
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_hexpand(True)
         scrolled_window.set_vexpand(True)
-        self.get_content_area().add(scrolled_window)
+        main_vbox.pack_start(scrolled_window, True, True, 0)
 
         # Use GtkSource.View for syntax highlighting
         self.buffer = GtkSource.Buffer()
@@ -492,9 +532,12 @@ class TextEditorDialog(Gtk.Dialog):
         if language:
             self.buffer.set_language(language)
 
-        # Set a style scheme
+        # Set a style scheme with fallback
         scheme_manager = GtkSource.StyleSchemeManager.get_default()
-        scheme = scheme_manager.get_scheme('oblivion') # Use a dark theme
+        scheme = scheme_manager.get_scheme('oblivion') # Preferred dark theme
+        if not scheme:
+            logging.warning("Could not find 'oblivion' theme, falling back to 'classic'.")
+            scheme = scheme_manager.get_scheme('classic')
         if scheme:
             self.buffer.set_style_scheme(scheme)
 
@@ -529,43 +572,59 @@ class TextEditorDialog(Gtk.Dialog):
         }
         self.compile_keymap()
         self._hook_view_handlers()
+        
+        self.update_undo_redo_sensitivity()
         self.show_all()
 
-    def undo(self):
+    def update_undo_redo_sensitivity(self):
+        self.undo_button.set_sensitive(len(self.undo_manager.undo_stack) > 0)
+        self.redo_button.set_sensitive(len(self.undo_manager.redo_stack) > 0)
+
+    def undo(self, widget=None):
         """Undoes the last user action."""
-        self.undo_manager.undo()
+        if self.undo_manager.undo():
+            self.update_undo_redo_sensitivity()
 
-    def redo(self):
+    def redo(self, widget=None):
         """Redoes the last undone user action."""
-        self.undo_manager.redo()
+        if self.undo_manager.redo():
+            self.update_undo_redo_sensitivity()
 
+    def on_ask_ai(self, widget):
+        """Placeholder for AI functionality."""
+        prompt = self.ai_prompt_entry.get_text()
+        logging.info(f"Ask AI button clicked with prompt: '{prompt}'")
+        # AI logic would go here
+        
     def set_initial_content(self, text):
         """
         Safely sets the buffer's initial text, ensuring it's a string.
-        This method should be used by external code to populate the editor
-        to avoid TypeErrors if the content is not a string.
         """
         if not isinstance(text, str):
             text = str(text)
         self.buffer.set_text(text)
+        self.undo_manager.undo_stack.clear()
+        self.undo_manager.redo_stack.clear()
+        self.update_undo_redo_sensitivity()
 
-    def get_final_content(self):
-        """
-        Returns the current text content of the editor buffer, with unescaped
-        newlines escaped so the entire content can be run as a single shell command.
-        """
+    def get_raw_content(self):
+        """Returns the current, unmodified text content of the editor buffer."""
         start_iter = self.buffer.get_start_iter()
         end_iter = self.buffer.get_end_iter()
-        text = self.buffer.get_text(start_iter, end_iter, True)
+        return self.buffer.get_text(start_iter, end_iter, True)
+
+    def get_escaped_content(self):
+        """
+        Returns the buffer content with unescaped newlines escaped, suitable
+        for execution as a single shell command.
+        """
+        text = self.get_raw_content()
 
         # A single trailing newline is often just for file formatting, so we remove it
-        # to avoid a dangling line-continuation character at the end of the command.
         if text.endswith('\n'):
             text = text[:-1]
 
-        # Replace any newline that isn't already escaped with a backslash
-        # to create a single, multi-line shell command.
-        # The replacement is ' \\\n' which is the standard way to continue a line.
+        # Replace any newline that isn't already escaped with a backslash and a newline
         escaped_text = re.sub(r'(?<!\\)\n', r' \\\n', text)
         
         return escaped_text
