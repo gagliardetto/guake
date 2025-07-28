@@ -104,11 +104,11 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
             menu.add(Gtk.SeparatorMenuItem())
 
     # add editor
-    mi = Gtk.MenuItem(_("Edit content..."))
-    mi.connect("activate", callback_object.on_edit_content)
+    mi = Gtk.MenuItem(_("Edit command..."))
+    mi.connect("activate", callback_object.on_edit_command)
     menu.add(mi)
     menu.add(Gtk.SeparatorMenuItem())
-    
+
     mi = Gtk.MenuItem(_("Copy"))
     mi.connect("activate", callback_object.on_copy_clipboard)
     menu.add(mi)

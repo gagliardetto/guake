@@ -449,7 +449,7 @@ class UndoManager:
 class TextEditorDialog(Gtk.Dialog):
     def __init__(self, parent=None):
         super().__init__(
-            title="Text Editor",
+            title="Command Editor",
             parent=parent,
             flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
         )
@@ -463,7 +463,12 @@ class TextEditorDialog(Gtk.Dialog):
         style_context.add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         run_button.get_style_context().add_class("suggested-action")
 
-        self.set_default_size(800, 600)
+        screen = Gdk.Screen.get_default()
+        screen_width = screen.get_width()
+        screen_height = screen.get_height()
+        four_fifths_width = screen_width // 5 * 4
+        one_third_height = screen_height // 3
+        self.set_default_size(four_fifths_width, one_third_height)
 
         # -- Logging Setup --
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -489,7 +494,7 @@ class TextEditorDialog(Gtk.Dialog):
 
         # Set a style scheme
         scheme_manager = GtkSource.StyleSchemeManager.get_default()
-        scheme = scheme_manager.get_scheme('classic') # Or any other available scheme
+        scheme = scheme_manager.get_scheme('oblivion') # Use a dark theme
         if scheme:
             self.buffer.set_style_scheme(scheme)
 

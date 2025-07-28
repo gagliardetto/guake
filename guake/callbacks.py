@@ -43,12 +43,12 @@ class TerminalContextMenuCallbacks:
 
     def on_save_to_file(self, *args):
         SaveTerminalDialog(self.terminal, self.window).run()
-    def on_edit_content(self, *args):
+    def on_edit_command(self, *args):
         from guake.editor import TextEditorDialog
         dialog = TextEditorDialog(parent=self.window)
         dialog.set_transient_for(self.window)
         dialog.set_modal(True)
-        dialog.set_default_size(800, 600)
+
         # Get the current terminal input buffer content
         terminal_input = self.terminal.get_input_content()
         log.info("Current input in terminal: %s", terminal_input)
