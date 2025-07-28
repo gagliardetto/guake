@@ -408,27 +408,55 @@ class NewWorkspacePlaceholder(Gtk.Box):
         self.set_vexpand(True)
         self.set_hexpand(True)
 
+        # Apply the full-size transparent background to this widget
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            .new-workspace-placeholder {
+                background-color: rgba(30, 30, 30, 0.9);
+            }
+        """)
+        self.get_style_context().add_class("new-workspace-placeholder")
+        self.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        # A box to center the content
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         content_box.set_halign(Gtk.Align.CENTER)
         content_box.set_valign(Gtk.Align.CENTER)
         
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b"""
-            .new-workspace-placeholder-content {
-                background-color: rgba(0, 0, 0, 0.2);
-                border-radius: 8px;
-                padding: 40px;
-            }
-        """)
-        content_box.get_style_context().add_class("new-workspace-placeholder-content")
-        content_box.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        
         label = Gtk.Label(label="This is a new workspace.\nWhat would you like to do next?")
         label.set_justify(Gtk.Justification.CENTER)
+        
+        # Style the label for better visibility on a dark background
+        label_css = Gtk.CssProvider()
+        label_css.load_from_data(b"label { color: white; font-size: 1.2em; }")
+        label.get_style_context().add_provider(label_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
         content_box.pack_start(label, False, False, 10)
 
         new_term_button = Gtk.Button.new_with_label("Create a new terminal")
         new_term_button.connect("clicked", self.on_create_terminal_clicked)
+        
+        # Style the button for the dark theme
+        button_css = Gtk.CssProvider()
+        button_css.load_from_data(b"""
+            button { 
+                font-size: 1.1em; 
+                padding: 10px 20px;
+                border-radius: 5px;
+                border: 1px solid #555;
+                background-image: none;
+                background-color: #333;
+                color: white;
+            }
+            button:hover {
+                background-color: #444;
+            }
+            button:active {
+                background-color: #222;
+            }
+        """)
+        new_term_button.get_style_context().add_provider(button_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
         content_box.pack_start(new_term_button, False, False, 0)
 
         self.pack_start(content_box, True, True, 0)
