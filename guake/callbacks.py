@@ -15,6 +15,10 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
 
+import logging
+
+log = logging.getLogger(__name__)
+
 class TerminalContextMenuCallbacks:
     def __init__(self, terminal, window, settings, notebook):
         self.terminal = terminal
@@ -45,14 +49,25 @@ class TerminalContextMenuCallbacks:
         dialog.set_transient_for(self.window)
         dialog.set_modal(True)
         dialog.set_default_size(800, 600)
-        # Load the terminal content into the editor
-        terminal_content = self.terminal.get_text()
-        dialog.buffer.set_text(terminal_content)
+        # Get the current terminal input buffer content
+        terminal_input = self.terminal.get_input_content()
+        log.info("Current input in terminal: %s", terminal_input)
+        dialog.set_initial_content(terminal_input)
         response = dialog.run()
-        if response == Gtk.ResponseType.CLOSE:
+        # catch ESCAPE key press
+        if response == Gtk.ResponseType.CANCEL:
+            dialog.destroy()
+            return
+        # if the user clicked OK, save the changes
+        elif response == Gtk.ResponseType.OK:
             # Save changes back to the terminal
-            new_content = dialog.buffer.get_text(dialog.buffer.get_start_iter(), dialog.buffer.get_end_iter(), False)
-            self.terminal.set_text(new_content)
+            new_content = dialog.get_final_content()
+            log.info("New command to run: %s", new_content)
+        # if the user clicked CLOSE, just close the dialog without saving
+        elif response == Gtk.ResponseType.CLOSE:
+            # If the user clicked CLOSE, we do not save changes
+            # but we still want to close the dialog
+            pass
         dialog.destroy()
 
     def on_save_to_clipboard(self, *args):

@@ -452,7 +452,16 @@ class TextEditorDialog(Gtk.Dialog):
             parent=parent,
             flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
         )
-        self.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+        self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+        run_button = self.add_button("Run", Gtk.ResponseType.OK)
+        
+        # Style the run button to be green
+        style_context = run_button.get_style_context()
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b".suggested-action { background-color: #4CAF50; color: white; }")
+        style_context.add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        run_button.get_style_context().add_class("suggested-action")
+
         self.set_default_size(800, 600)
 
         # -- Logging Setup --
@@ -508,15 +517,21 @@ class TextEditorDialog(Gtk.Dialog):
         """Redoes the last undone user action."""
         self.undo_manager.redo()
 
-    def set_text(self, text):
+    def set_initial_content(self, text):
         """
-        Safely sets the buffer text, ensuring it's a string.
+        Safely sets the buffer's initial text, ensuring it's a string.
         This method should be used by external code to populate the editor
         to avoid TypeErrors if the content is not a string.
         """
         if not isinstance(text, str):
             text = str(text)
         self.buffer.set_text(text)
+
+    def get_final_content(self):
+        """Returns the current text content of the editor buffer."""
+        start_iter = self.buffer.get_start_iter()
+        end_iter = self.buffer.get_end_iter()
+        return self.buffer.get_text(start_iter, end_iter, True)
 
     def compile_keymap(self):
         new_keymap = {}
