@@ -314,6 +314,65 @@ class CompositeAction(UndoAction):
         for action in self.actions:
             action.redo()
 
+class MultiCursorUndoAction(UndoAction):
+    """An action that also saves and restores the state of all cursors."""
+    def __init__(self, dialog):
+        self.dialog = dialog
+        self.actions = []
+
+        # Save pre-action state (offsets)
+        insert_mark = self.dialog.doc.get_mark("insert")
+        selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
+        self.primary_before = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
+                               selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
+        self.secondary_before = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
+
+    def add(self, action):
+        self.actions.append(action)
+
+    def save_post_state(self):
+        # Save post-action state (offsets)
+        insert_mark = self.dialog.doc.get_mark("insert")
+        selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
+        self.primary_after = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
+                              selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
+        self.secondary_after = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
+
+    def undo(self):
+        for action in reversed(self.actions):
+            action.undo()
+        
+        # Restore cursors from saved offsets
+        primary_insert_iter = self.dialog.doc.get_iter_at_offset(self.primary_before[0])
+        primary_select_iter = self.dialog.doc.get_iter_at_offset(self.primary_before[1])
+        self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
+        self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
+
+        for i, cursor in enumerate(self.dialog.cursors):
+            start_iter = self.dialog.doc.get_iter_at_offset(self.secondary_before[i][0])
+            end_iter = self.dialog.doc.get_iter_at_offset(self.secondary_before[i][1])
+            cursor.tag.move_marks(start_iter, end_iter)
+        
+        self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
+
+    def redo(self):
+        for action in self.actions:
+            action.redo()
+        
+        # Restore cursors from saved offsets
+        primary_insert_iter = self.dialog.doc.get_iter_at_offset(self.primary_after[0])
+        primary_select_iter = self.dialog.doc.get_iter_at_offset(self.primary_after[1])
+        self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
+        self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
+
+        for i, cursor in enumerate(self.dialog.cursors):
+            start_iter = self.dialog.doc.get_iter_at_offset(self.secondary_after[i][0])
+            end_iter = self.dialog.doc.get_iter_at_offset(self.secondary_after[i][1])
+            cursor.tag.move_marks(start_iter, end_iter)
+            
+        self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
+
+
 # ############################################################################
 # Undo/Redo Manager
 # ############################################################################
@@ -325,6 +384,7 @@ class UndoManager:
         self.redo_stack = []
         self.undo_lock = False
         self.current_action_group = None
+        self.editor = None # Will be monkey-patched
 
         self.buffer.connect("begin-user-action", self._on_begin_user_action)
         self.buffer.connect_after("end-user-action", self._on_end_user_action)
@@ -333,11 +393,18 @@ class UndoManager:
 
     def _on_begin_user_action(self, buf):
         if self.undo_lock: return
-        self.current_action_group = CompositeAction()
+        
+        if self.editor and self.editor.cursors:
+            self.current_action_group = MultiCursorUndoAction(self.editor)
+        else:
+            self.current_action_group = CompositeAction()
 
     def _on_end_user_action(self, buf):
         if self.undo_lock: return
         if self.current_action_group and self.current_action_group.actions:
+            if isinstance(self.current_action_group, MultiCursorUndoAction):
+                self.current_action_group.save_post_state()
+
             self.undo_stack.append(self.current_action_group)
             self.redo_stack.clear()
         self.current_action_group = None
@@ -393,11 +460,13 @@ class TextEditorDialog(Gtk.Dialog):
 
         self.view = Gtk.TextView()
         self.buffer = self.view.get_buffer()
+        # self.buffer.set_enable_undo(False)
         self.doc = self.buffer # Alias for compatibility with inspiration code
         scrolled_window.add(self.view)
 
         # -- Undo/Redo Manager --
         self.undo_manager = UndoManager(self.buffer)
+        self.undo_manager.editor = self
 
         # -- Feature Implementation --
         self._handlers = []
