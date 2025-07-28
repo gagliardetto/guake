@@ -39,6 +39,21 @@ class TerminalContextMenuCallbacks:
 
     def on_save_to_file(self, *args):
         SaveTerminalDialog(self.terminal, self.window).run()
+    def on_edit_content(self, *args):
+        from guake.editor import TextEditorDialog
+        dialog = TextEditorDialog(parent=self.window)
+        dialog.set_transient_for(self.window)
+        dialog.set_modal(True)
+        dialog.set_default_size(800, 600)
+        # Load the terminal content into the editor
+        terminal_content = self.terminal.get_text()
+        dialog.buffer.set_text(terminal_content)
+        response = dialog.run()
+        if response == Gtk.ResponseType.CLOSE:
+            # Save changes back to the terminal
+            new_content = dialog.buffer.get_text(dialog.buffer.get_start_iter(), dialog.buffer.get_end_iter(), False)
+            self.terminal.set_text(new_content)
+        dialog.destroy()
 
     def on_save_to_clipboard(self, *args):
         vte_terminal = self.terminal  # Assuming self.terminal is a VTE Terminal object
