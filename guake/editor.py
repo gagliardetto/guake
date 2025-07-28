@@ -223,17 +223,21 @@ class Cursor:
                 self.move_iter(end_iter, step_size, count)
             else:
                 self.move_iter(start_iter, step_size, count)
-        elif (end_iter.get_offset() != start_iter.get_offset()):
-            if (count < 0):
-                end_iter = start_iter.copy()
-            else:
-                start_iter = end_iter.copy()
-            if ((step_size != Gtk.MovementStep.LOGICAL_POSITIONS) and (step_size != Gtk.MovementStep.VISUAL_POSITIONS)):
-                self.move_iter(start_iter, step_size, count)
-                self.move_iter(end_iter, step_size, count)
         else:
+            # This block handles all non-extending moves.
+            # If there is a selection, collapse it in the direction of movement.
+            if start_iter.get_offset() != end_iter.get_offset():
+                if count < 0:
+                    end_iter = start_iter.copy()
+                else: # Handles count > 0 and count == 0
+                    start_iter = end_iter.copy()
+            
+            # Now, move the (now collapsed) cursor.
+            # Since start_iter and end_iter are the same, we only need to move one
+            # and then sync the other.
             self.move_iter(start_iter, step_size, count)
-            self.move_iter(end_iter, step_size, count)
+            end_iter = start_iter.copy()
+
         self.tag.move_marks(start_iter, end_iter)
 
     def move_iter(self, pos, step_size, count):
