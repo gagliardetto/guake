@@ -205,13 +205,13 @@ class MyListBoxRow(Gtk.ListBoxRow):
         # Use a Grid for a more structured and organized layout
         grid = Gtk.Grid()
         grid.set_column_spacing(15)
-        grid.set_row_spacing(2)
-        grid.set_margin_start(10)
-        grid.set_margin_end(10)
-        grid.set_margin_top(8)
-        grid.set_margin_bottom(8)
+        grid.set_row_spacing(5)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
 
-        # Tab Label (Primary Info) - styled with Pango markup
+        # Tab Label (Primary Info)
         self.label = Gtk.Label()
         self.label.set_xalign(0)
         self.label.set_hexpand(True)
@@ -220,15 +220,15 @@ class MyListBoxRow(Gtk.ListBoxRow):
         self.ws_label = Gtk.Label()
         self.ws_label.set_xalign(1)
 
-        # CWD Label (Tertiary Info) - smaller and italicized
+        # CWD Label (Tertiary Info)
         self.cwd_label = Gtk.Label()
         self.cwd_label.set_xalign(0)
         self.cwd_label.set_hexpand(True)
         self.cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
 
+        # Set initial text with default styling
         self.update_highlighting(None)
-        self.ws_label.set_markup(f"{self.workspace_name}")
-
+        self.ws_label.set_markup(f"<span foreground='gray'>{self.workspace_name}</span>")
 
         # Attach widgets to the grid layout
         grid.attach(self.label, 0, 0, 1, 1)      # (child, col, row, width, height)
@@ -239,20 +239,24 @@ class MyListBoxRow(Gtk.ListBoxRow):
 
     def update_highlighting(self, filter_text):
         """Updates the Pango markup to highlight text matching the filter."""
-        def highlight(text, is_bold=False):
+        def highlight(text, base_markup):
             escaped_original = GLib.markup_escape_text(text)
             if not filter_text:
-                return f"<b>{escaped_original}</b>" if is_bold else escaped_original
+                return base_markup.format(text=escaped_original)
 
             # Underline the matching text
             highlighted = re.sub(f'({re.escape(filter_text)})',
                                  r'<u>\1</u>',
                                  escaped_original,
                                  flags=re.IGNORECASE)
-            return f"<b>{highlighted}</b>" if is_bold else highlighted
+            return base_markup.format(text=highlighted)
 
-        self.label.set_markup(f"<span size='large'>{highlight(self.tab_label_text, is_bold=True)}</span>")
-        self.cwd_label.set_markup(f"<i>{highlight(self.tab_cwd_text)}</i>")
+        # Define base markup templates for styling
+        label_markup = "<span size='large'><b>{text}</b></span>"
+        cwd_markup = "<span size='large'>{text}</span>"
+
+        self.label.set_markup(highlight(self.tab_label_text, label_markup))
+        self.cwd_label.set_markup(highlight(self.tab_cwd_text, cwd_markup))
 
 
 class QuickTabNavigationDialog(Gtk.Dialog):
