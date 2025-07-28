@@ -757,32 +757,53 @@ class TextEditorDialog(Gtk.Dialog):
             logging.error(f"Error while formatting: {e.stderr}")
 
     def validate_content(self, widget=None):
-        """Checks the shell script for syntax errors using 'bash -n'."""
+        """Validate shell script syntax using 'bash -n' and update UI accordingly."""
         script_content = self.get_raw_content()
+
+        if not script_content.strip():
+            return self._update_info_bar(
+                message="No content to validate.",
+                color="orange",
+                msg_type=Gtk.MessageType.WARNING
+            )
+
         try:
             process = subprocess.run(
-                ['bash', '-n'],
+                ["bash", "-n"],
                 input=script_content,
                 capture_output=True,
-                text=True
+                text=True,
+                check=False  # Do not raise, handle ourselves
             )
+
             if process.returncode == 0:
-                self.info_label.set_text("Syntax is valid.")
-                self.info_label.set_markup('<span foreground="green">Syntax is valid.</span>')
-                self.info_bar.set_message_type(Gtk.MessageType.INFO)
+                self._update_info_bar(
+                    message="Syntax is valid.",
+                    color="green",
+                    msg_type=Gtk.MessageType.INFO
+                )
             else:
-                # Get the last line of the error for a concise message
-                error_message = process.stderr.strip().split('\n')[-1]
-                self.info_label.set_text(f"Syntax error: {error_message}")
-                self.info_label.set_markup(f'<span foreground="red">Syntax error: {error_message}</span>')
-                self.info_bar.set_message_type(Gtk.MessageType.ERROR)
-            
-            self.info_bar.show()
+                # Extract the last relevant error line
+                error_message = process.stderr.strip().splitlines()[-1] if process.stderr else "Unknown syntax error."
+                self._update_info_bar(
+                    message=f"Syntax error: {error_message}",
+                    color="red",
+                    msg_type=Gtk.MessageType.ERROR
+                )
 
         except FileNotFoundError:
-            self.info_label.set_text("Error: 'bash' command not found.")
-            self.info_bar.set_message_type(Gtk.MessageType.ERROR)
-            self.info_bar.show()
+            self._update_info_bar(
+                message="Error: 'bash' command not found.",
+                color="red",
+                msg_type=Gtk.MessageType.ERROR
+            )
+
+    def _update_info_bar(self, message: str, color: str, msg_type: Gtk.MessageType):
+        """Update the Gtk info bar with message and styling."""
+        self.info_label.set_text(message)
+        self.info_label.set_markup(f'<span foreground="{color}">{GLib.markup_escape_text(message)}</span>')
+        self.info_bar.set_message_type(msg_type)
+        self.info_bar.show()
 
     def compile_keymap(self):
         new_keymap = {}
