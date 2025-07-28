@@ -45,9 +45,10 @@ class TerminalContextMenuCallbacks:
         SaveTerminalDialog(self.terminal, self.window).run()
     def on_edit_command(self, *args):
         from guake.editor import TextEditorDialog
-        dialog = TextEditorDialog(parent=self.window)
-        dialog.set_transient_for(self.window)
-        dialog.set_modal(True)
+        from guake.ai import AIChatWindow, MyAIHandler
+        ai_handler = MyAIHandler()
+        dialog = TextEditorDialog(parent=self.window, ai_handler=ai_handler)
+        # dialog.set_transient_for(self.window)
 
         # Get the current terminal input buffer content
         terminal_input = self.terminal.get_input_content()

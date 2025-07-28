@@ -7,6 +7,18 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("GtkSource", "4")
 from gi.repository import GObject, Gtk, Gdk, GLib, Pango, GtkSource
 
+# Import AI components safely
+try:
+    from guake.ai import AIChatWindow, MyAIHandler
+    AI_AVAILABLE = True
+except ImportError:
+    logging.warning("ai.py not found. AI features will be disabled.")
+    AI_AVAILABLE = False
+    # Define placeholder classes if ai.py is not found to prevent crashes
+    class AIChatWindow: pass
+    class MyAIHandler: pass
+
+
 # ############################################################################
 # Helper class for detecting and converting between different casing conventions
 # ############################################################################
@@ -452,20 +464,48 @@ class UndoManager:
 # Main Editor Dialog
 # ############################################################################
 class TextEditorDialog(Gtk.Dialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, ai_handler=None):
         super().__init__(
             title="Text Editor",
             parent=parent,
-            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+            flags=Gtk.DialogFlags.DESTROY_WITH_PARENT, # REMOVED MODAL FLAG
         )
+        self.ai_handler = ai_handler
         self.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
         run_button = self.add_button("Run", Gtk.ResponseType.OK)
         
         # Style the run button to be green
         style_context = run_button.get_style_context()
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b".suggested-action { background-color: #4CAF50; color: white; }")
-        style_context.add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        self.css_provider = Gtk.CssProvider()
+        self.css_provider.load_from_data(b"""
+            .suggested-action { background-color: #4CAF50; color: white; }
+            .ai-chat-window {
+                background-color: rgba(45, 45, 45, 0.95);
+                color: white;
+            }
+            .ai-chat-header {
+                background-color: rgba(255, 255, 255, 0.05);
+                padding: 8px;
+                font-weight: bold;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .chat-close-button {
+                background: none;
+                border: none;
+                padding: 0;
+            }
+            .user-message {
+                color: #e0e0e0;
+                font-size: small;
+            }
+            .bot-message {
+                color: #a5d6a7; /* A light green for the bot */
+                font-size: small;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), self.css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
         run_button.get_style_context().add_class("suggested-action")
 
         screen = Gdk.Screen.get_default()
@@ -486,13 +526,11 @@ class TextEditorDialog(Gtk.Dialog):
         toolbar = Gtk.Toolbar()
         main_vbox.pack_start(toolbar, False, False, 0)
         
-        # Undo button
         self.undo_button = Gtk.ToolButton.new(None, "Undo")
         self.undo_button.set_icon_name("edit-undo-symbolic")
         self.undo_button.connect("clicked", self.undo)
         toolbar.insert(self.undo_button, -1)
 
-        # Redo button
         self.redo_button = Gtk.ToolButton.new(None, "Redo")
         self.redo_button.set_icon_name("edit-redo-symbolic")
         self.redo_button.connect("clicked", self.redo)
@@ -500,18 +538,12 @@ class TextEditorDialog(Gtk.Dialog):
         
         toolbar.insert(Gtk.SeparatorToolItem(), -1)
 
-        # AI Prompt Entry
-        ai_prompt_entry_item = Gtk.ToolItem()
-        self.ai_prompt_entry = Gtk.Entry()
-        self.ai_prompt_entry.set_placeholder_text("Enter AI prompt...")
-        ai_prompt_entry_item.add(self.ai_prompt_entry)
-        toolbar.insert(ai_prompt_entry_item, -1)
-
-        # Ask AI button
         ask_ai_button = Gtk.ToolButton.new(None, "Ask AI")
-        ask_ai_button.set_icon_name("system-search-symbolic")
-        ask_ai_button.connect("clicked", self.on_ask_ai)
+        ask_ai_button.set_icon_name("view-reveal-symbolic")
+        ask_ai_button.connect("clicked", self.toggle_ai_window)
         toolbar.insert(ask_ai_button, -1)
+        if not self.ai_handler:
+            ask_ai_button.set_sensitive(False)
 
         # -- Editor Setup --
         scrolled_window = Gtk.ScrolledWindow()
@@ -519,30 +551,30 @@ class TextEditorDialog(Gtk.Dialog):
         scrolled_window.set_vexpand(True)
         main_vbox.pack_start(scrolled_window, True, True, 0)
 
-        # Use GtkSource.View for syntax highlighting
         self.buffer = GtkSource.Buffer()
         self.view = GtkSource.View.new_with_buffer(self.buffer)
         self.view.set_show_line_numbers(True)
         self.view.set_auto_indent(True)
         self.view.set_highlight_current_line(True)
         
-        # Set the language for Bash syntax highlighting
         lang_manager = GtkSource.LanguageManager.get_default()
-        language = lang_manager.get_language('sh') # 'sh' is the id for shell scripts
+        language = lang_manager.get_language('sh')
         if language:
             self.buffer.set_language(language)
 
-        # Set a style scheme with fallback
         scheme_manager = GtkSource.StyleSchemeManager.get_default()
-        scheme = scheme_manager.get_scheme('oblivion') # Preferred dark theme
+        scheme = scheme_manager.get_scheme('oblivion')
         if not scheme:
             logging.warning("Could not find 'oblivion' theme, falling back to 'classic'.")
             scheme = scheme_manager.get_scheme('classic')
         if scheme:
             self.buffer.set_style_scheme(scheme)
 
-        self.doc = self.buffer # Alias for compatibility
+        self.doc = self.buffer
         scrolled_window.add(self.view)
+        
+        # -- AI Chat Window --
+        self.ai_chat_window = None
 
         # -- Undo/Redo Manager --
         self.undo_manager = UndoManager(self.buffer)
@@ -576,30 +608,29 @@ class TextEditorDialog(Gtk.Dialog):
         self.update_undo_redo_sensitivity()
         self.show_all()
 
+    def toggle_ai_window(self, widget):
+        if self.ai_chat_window is None and self.ai_handler and AI_AVAILABLE:
+            self.ai_chat_window = AIChatWindow(self, self.ai_handler)
+        
+        if self.ai_chat_window:
+            if self.ai_chat_window.get_visible():
+                self.ai_chat_window.hide()
+            else:
+                self.ai_chat_window.show_all()
+
     def update_undo_redo_sensitivity(self):
         self.undo_button.set_sensitive(len(self.undo_manager.undo_stack) > 0)
         self.redo_button.set_sensitive(len(self.undo_manager.redo_stack) > 0)
 
     def undo(self, widget=None):
-        """Undoes the last user action."""
         if self.undo_manager.undo():
             self.update_undo_redo_sensitivity()
 
     def redo(self, widget=None):
-        """Redoes the last undone user action."""
         if self.undo_manager.redo():
             self.update_undo_redo_sensitivity()
-
-    def on_ask_ai(self, widget):
-        """Placeholder for AI functionality."""
-        prompt = self.ai_prompt_entry.get_text()
-        logging.info(f"Ask AI button clicked with prompt: '{prompt}'")
-        # AI logic would go here
         
     def set_initial_content(self, text):
-        """
-        Safely sets the buffer's initial text, ensuring it's a string.
-        """
         if not isinstance(text, str):
             text = str(text)
         self.buffer.set_text(text)
@@ -608,25 +639,15 @@ class TextEditorDialog(Gtk.Dialog):
         self.update_undo_redo_sensitivity()
 
     def get_raw_content(self):
-        """Returns the current, unmodified text content of the editor buffer."""
         start_iter = self.buffer.get_start_iter()
         end_iter = self.buffer.get_end_iter()
         return self.buffer.get_text(start_iter, end_iter, True)
 
     def get_escaped_content(self):
-        """
-        Returns the buffer content with unescaped newlines escaped, suitable
-        for execution as a single shell command.
-        """
         text = self.get_raw_content()
-
-        # A single trailing newline is often just for file formatting, so we remove it
         if text.endswith('\n'):
             text = text[:-1]
-
-        # Replace any newline that isn't already escaped with a backslash and a newline
         escaped_text = re.sub(r'(?<!\\)\n', r' \\\n', text)
-        
         return escaped_text
 
     def compile_keymap(self):
