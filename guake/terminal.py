@@ -683,3 +683,66 @@ class GuakeTerminal(Vte.Terminal):
             self.custom_palette = [self._color_from_list(col) for col in palette]
         else:
             self.custom_palette = None
+
+    def get_input_content(self):
+        """
+        Returns the input line buffer of the terminal. This method uses a
+        heuristic to locate the start of the command. It searches backwards
+        from the cursor to find the last line containing a '' character,
+        which it assumes is the prompt. It then returns all text from that
+        point to the cursor, correctly capturing multi-line commands.
+        """
+        try:
+            cursor_pos = self.get_cursor_position()
+            start_row = -1
+            start_col = -1
+
+            # Search backwards from the cursor's row for the prompt marker.
+            for row in range(cursor_pos.row, -1, -1):
+                if (Vte.MAJOR_VERSION, Vte.MINOR_VERSION) < (0, 50):
+                    line_tuple = self.get_text_range(row, 0, row, self.get_column_count(), lambda *a: True)
+                else:
+                    line_tuple = self.get_text_range(row, 0, row, self.get_column_count())
+
+                if line_tuple and line_tuple[0]:
+                    line_text = line_tuple[0].rstrip('\x00')
+                    prompt_offset = line_text.rfind('')
+                    if prompt_offset != -1:
+                        start_row = row
+                        start_col = prompt_offset + 1
+                        break
+
+            # If a prompt marker was found, get the text from there to the cursor.
+            if start_row != -1:
+                if (Vte.MAJOR_VERSION, Vte.MINOR_VERSION) < (0, 50):
+                    command_text_tuple = self.get_text_range(
+                        start_row, start_col,
+                        cursor_pos.row, cursor_pos.column,
+                        lambda *a: True
+                    )
+                else:
+                    command_text_tuple = self.get_text_range(
+                        start_row, start_col,
+                        cursor_pos.row, cursor_pos.column
+                    )
+
+                if command_text_tuple and command_text_tuple[0]:
+                    return command_text_tuple[0].lstrip()
+
+            # Fallback: If no prompt marker is found, use the original simple heuristic.
+            if (Vte.MAJOR_VERSION, Vte.MINOR_VERSION) < (0, 50):
+                text_tuple = self.get_text_range(
+                    cursor_pos.row, 0, cursor_pos.row, cursor_pos.column, lambda *a: True
+                )
+            else:
+                text_tuple = self.get_text_range(
+                    cursor_pos.row, 0, cursor_pos.row, cursor_pos.column
+                )
+
+            if text_tuple and text_tuple[0]:
+                return text_tuple[0]
+
+        except GLib.Error as e:
+            log.error("Could not get terminal input content: %s", e)
+
+        return ""
