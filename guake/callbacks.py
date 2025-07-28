@@ -43,6 +43,12 @@ class TerminalContextMenuCallbacks:
 
     def on_save_to_file(self, *args):
         SaveTerminalDialog(self.terminal, self.window).run()
+    def on_dialog_response(self, dialog, response_id):
+        if response_id == Gtk.ResponseType.OK:
+            print("Final Content (escaped):\n", dialog.get_escaped_content())
+        else:
+            print("Editor closed without running.")
+        dialog.destroy() # This will also trigger the on_destroy handler
     def on_edit_command(self, *args):
         from guake.editor import TextEditorDialog
         from guake.ai import AIChatWindow, MyAIHandler
@@ -54,22 +60,8 @@ class TerminalContextMenuCallbacks:
         terminal_input = self.terminal.get_input_content()
         log.info("Current input in terminal: %s", terminal_input)
         dialog.set_initial_content(terminal_input)
-        response = dialog.run()
-        # catch ESCAPE key press
-        if response == Gtk.ResponseType.CANCEL:
-            dialog.destroy()
-            return
-        # if the user clicked OK, save the changes
-        elif response == Gtk.ResponseType.OK:
-            # Save changes back to the terminal
-            new_content = dialog.get_escaped_content()
-            log.info("New command to run: %s", new_content)
-        # if the user clicked CLOSE, just close the dialog without saving
-        elif response == Gtk.ResponseType.CLOSE:
-            # If the user clicked CLOSE, we do not save changes
-            # but we still want to close the dialog
-            pass
-        dialog.destroy()
+        dialog.connect("response", self.on_dialog_response)
+        response = dialog.show()
 
     def on_save_to_clipboard(self, *args):
         vte_terminal = self.terminal  # Assuming self.terminal is a VTE Terminal object

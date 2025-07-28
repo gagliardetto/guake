@@ -655,6 +655,43 @@ class TextEditorDialog(Gtk.Dialog):
         escaped_text = re.sub(r'(?<!\\)\n', r' \\\n', text)
         return escaped_text
 
+    def insert_at_cursor(self, text):
+        """
+        Programmatically inserts text at the primary cursor and all secondary cursors,
+        making the action a single, undoable event. Replaces any active selections.
+        """
+        self._is_modifying_programmatically = True
+        self.buffer.begin_user_action()
+
+        # Collect all cursor positions (primary and secondary)
+        all_selections = []
+        # Add secondary cursors
+        for cursor in self.cursors:
+            all_selections.append(self.order_iters((cursor.tag.get_start_iter(), cursor.tag.get_end_iter())))
+        # Add primary cursor
+        all_selections.append(self.order_iters(self.get_selection_iters()))
+
+        # Remove duplicates (in case primary selection overlaps with a secondary cursor)
+        unique_selections = []
+        seen_offsets = set()
+        for start, end in all_selections:
+            if start and end:
+                offsets = (start.get_offset(), end.get_offset())
+                if offsets not in seen_offsets:
+                    unique_selections.append((start, end))
+                    seen_offsets.add(offsets)
+
+        # Sort all selections in reverse order by start position
+        sorted_selections = sorted(unique_selections, key=lambda s: s[0].get_offset(), reverse=True)
+
+        # Perform insertions
+        for start, end in sorted_selections:
+            self.buffer.delete(start, end)
+            self.buffer.insert(start, text)
+
+        self.buffer.end_user_action()
+        self._is_modifying_programmatically = False
+
     def compile_keymap(self):
         new_keymap = {}
         for (combo, action) in self.keymap.items():
@@ -911,4 +948,3 @@ class TextEditorDialog(Gtk.Dialog):
             
     def mc_paste_clipboard(self, view):
         self._handled_paste = True
-

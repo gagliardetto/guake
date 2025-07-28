@@ -101,4 +101,4 @@ class MyAIHandler:
 
         # Example: Modify the editor content
         if "insert hello" in prompt.lower():
-            editor.buffer.insert_at_cursor("hello world")
+            editor.insert_at_cursor("hello world")
