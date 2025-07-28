@@ -461,7 +461,7 @@ class TextEditorDialog(Gtk.Dialog):
         self.add_handler(self.doc, 'delete-range', self.delete)
         self.add_handler(self.doc, 'insert-text', self.insert)
         self.add_handler(self.doc, 'begin-user-action', self.begin_user_action)
-        self.add_handler(self.doc, 'end-user-action', self.end_user_action, 'after')
+        self.add_handler(self.doc, 'end-user-action', self.end_user_action)
         
     def _unhook_document_handlers(self):
         self.remove_handlers(self.doc)
@@ -663,10 +663,8 @@ class TextEditorDialog(Gtk.Dialog):
             
             self._is_modifying_programmatically = True
             
-            self.doc.begin_user_action()
             for action, args in actions_to_run:
                 action(*args)
-            self.doc.end_user_action()
             
             self._is_modifying_programmatically = False
         
