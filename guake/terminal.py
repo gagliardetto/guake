@@ -171,6 +171,7 @@ class GuakeTerminal(Vte.Terminal):
         signal to the shell.
         """
         self.feed_child("\x03")
+        # TODO: wait for execution to finish
 
     def copy_clipboard(self):
         if self.get_has_selection():

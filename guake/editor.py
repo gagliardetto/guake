@@ -524,6 +524,16 @@ class TextEditorDialog(Gtk.Dialog):
         main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.get_content_area().add(main_vbox)
 
+        # -- Info Bar for Validation --
+        self.info_bar = Gtk.InfoBar()
+        self.info_bar.set_no_show_all(True)
+        self.info_label = Gtk.Label()
+        self.info_label.set_markup('<span foreground="white">Ready</span>')
+        self.info_bar.get_content_area().add(self.info_label)
+        self.info_bar.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+        self.info_bar.connect("response", lambda w, r: self.info_bar.hide())
+        main_vbox.pack_start(self.info_bar, False, False, 0)
+
         # -- Toolbar --
         toolbar = Gtk.Toolbar()
         main_vbox.pack_start(toolbar, False, False, 0)
@@ -547,6 +557,11 @@ class TextEditorDialog(Gtk.Dialog):
         format_button.set_tooltip_text("Format the content of the editor")
         format_button.connect("clicked", self.format_content)
         toolbar.insert(format_button, -1)
+
+        validate_button = Gtk.ToolButton.new(None, "Validate")
+        validate_button.set_icon_name("emblem-ok-symbolic")
+        validate_button.connect("clicked", self.validate_content)
+        toolbar.insert(validate_button, -1)
 
         toolbar.insert(Gtk.SeparatorToolItem(), -1)
 
@@ -621,6 +636,7 @@ class TextEditorDialog(Gtk.Dialog):
             '<Primary>y': self.redo,
             '<Primary><Shift>z': self.redo,
             '<Primary>i': self.format_content,
+            '<Primary><Shift>v': self.validate_content,
         }
         self.compile_keymap()
         self._hook_view_handlers()
@@ -739,6 +755,34 @@ class TextEditorDialog(Gtk.Dialog):
             logging.error("The 'shfmt' command is not installed or not in your PATH.")
         except subprocess.CalledProcessError as e:
             logging.error(f"Error while formatting: {e.stderr}")
+
+    def validate_content(self, widget=None):
+        """Checks the shell script for syntax errors using 'bash -n'."""
+        script_content = self.get_raw_content()
+        try:
+            process = subprocess.run(
+                ['bash', '-n'],
+                input=script_content,
+                capture_output=True,
+                text=True
+            )
+            if process.returncode == 0:
+                self.info_label.set_text("Syntax is valid.")
+                self.info_label.set_markup('<span foreground="green">Syntax is valid.</span>')
+                self.info_bar.set_message_type(Gtk.MessageType.INFO)
+            else:
+                # Get the last line of the error for a concise message
+                error_message = process.stderr.strip().split('\n')[-1]
+                self.info_label.set_text(f"Syntax error: {error_message}")
+                self.info_label.set_markup(f'<span foreground="red">Syntax error: {error_message}</span>')
+                self.info_bar.set_message_type(Gtk.MessageType.ERROR)
+            
+            self.info_bar.show()
+
+        except FileNotFoundError:
+            self.info_label.set_text("Error: 'bash' command not found.")
+            self.info_bar.set_message_type(Gtk.MessageType.ERROR)
+            self.info_bar.show()
 
     def compile_keymap(self):
         new_keymap = {}
