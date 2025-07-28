@@ -212,7 +212,9 @@ class Cursor:
     def move(self, step_size, count, extend_selection):
         start_iter = self.tag.get_start_iter()
         end_iter = self.tag.get_end_iter()
+
         if (extend_selection):
+            # This part seems fine and is not the subject of the request.
             sel_start = self.doc.get_iter_at_mark(self.doc.get_insert())
             sel_end = self.doc.get_iter_at_mark(self.doc.get_selection_bound())
             sel_delta = sel_start.get_offset() - sel_end.get_offset()
@@ -223,20 +225,27 @@ class Cursor:
                 self.move_iter(end_iter, step_size, count)
             else:
                 self.move_iter(start_iter, step_size, count)
-        else:
-            # This block handles all non-extending moves.
-            # If there is a selection, collapse it in the direction of movement.
-            if start_iter.get_offset() != end_iter.get_offset():
-                if count < 0:
-                    end_iter = start_iter.copy()
-                else: # Handles count > 0 and count == 0
-                    start_iter = end_iter.copy()
+        
+        elif (start_iter.get_offset() != end_iter.get_offset()):
+            # This is a non-extending move on an existing selection.
+            # First, collapse the selection.
+            if (count < 0):
+                # Move left: collapse to the start of the selection.
+                end_iter = start_iter.copy()
+            else:
+                # Move right: collapse to the end of the selection.
+                start_iter = end_iter.copy()
             
-            # Now, move the (now collapsed) cursor.
-            # Since start_iter and end_iter are the same, we only need to move one
-            # and then sync the other.
+            # Now, move the collapsed cursor.
+            # Both iters are at the same position.
             self.move_iter(start_iter, step_size, count)
-            end_iter = start_iter.copy()
+            self.move_iter(end_iter, step_size, count)
+
+        else:
+            # This is a non-extending move on a caret (no selection).
+            # Just move the caret.
+            self.move_iter(start_iter, step_size, count)
+            self.move_iter(end_iter, step_size, count)
 
         self.tag.move_marks(start_iter, end_iter)
 
