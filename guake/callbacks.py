@@ -15,6 +15,10 @@ gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
 
+import logging
+
+log = logging.getLogger(__name__)
+
 class TerminalContextMenuCallbacks:
     def __init__(self, terminal, window, settings, notebook):
         self.terminal = terminal
@@ -39,6 +43,37 @@ class TerminalContextMenuCallbacks:
 
     def on_save_to_file(self, *args):
         SaveTerminalDialog(self.terminal, self.window).run()
+    def on_dialog_response(self, dialog, response_id):
+        if response_id == Gtk.ResponseType.OK:
+            print("Final Content (escaped):\n", dialog.get_escaped_content())
+            raw_content = dialog.get_raw_content()
+            print("Final Content (raw):\n", raw_content)
+            if not raw_content or raw_content.strip() == "":
+                # If the content is empty, we do not run it in the terminal
+                print("No content to run.")
+                return
+            print("Clearing terminal input and running command...")
+            self.terminal.clear_input()
+            log.info("Running command in terminal: %s", raw_content)
+            self.terminal.execute_command(raw_content)
+        elif response_id == Gtk.ResponseType.CANCEL:
+            print("Editor closed without saving changes.")
+        else:
+            print("Editor closed without running.")
+        dialog.destroy() # This will also trigger the on_destroy handler
+    def on_edit_command(self, *args):
+        from guake.editor import TextEditorDialog
+        from guake.ai import AIChatWindow, MyAIHandler
+        ai_handler = MyAIHandler()
+        dialog = TextEditorDialog(parent=self.window, ai_handler=ai_handler)
+        # dialog.set_transient_for(self.window)
+
+        # Get the current terminal input buffer content
+        terminal_input = self.terminal.get_input_content()
+        log.info("Current input in terminal: %s", terminal_input)
+        dialog.set_initial_content(terminal_input)
+        dialog.connect("response", self.on_dialog_response)
+        response = dialog.show()
 
     def on_save_to_clipboard(self, *args):
         vte_terminal = self.terminal  # Assuming self.terminal is a VTE Terminal object

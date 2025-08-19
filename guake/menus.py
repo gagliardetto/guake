@@ -28,6 +28,26 @@ def mk_tab_context_menu(callback_object):
     mi_close = Gtk.MenuItem(_("Close"))
     mi_close.connect("activate", callback_object.on_close)
     menu.add(mi_close)
+
+    # Add Move to Workspace submenu
+    guake = callback_object.notebook.guake
+    if guake and guake.workspace_manager:
+        menu.add(Gtk.SeparatorMenuItem())
+        move_to_ws_item = Gtk.MenuItem(_("Move to Workspace"))
+        menu.add(move_to_ws_item)
+        
+        submenu = Gtk.Menu()
+        move_to_ws_item.set_submenu(submenu)
+
+        page_index = callback_object.notebook.find_tab_index_by_label(callback_object)
+        if page_index != -1:
+            page = callback_object.notebook.get_nth_page(page_index)
+            terminals = page.get_terminals()
+            if terminals:
+                terminal_uuid = str(terminals[0].uuid)
+                log.info("Moving terminal %s to workspace", terminal_uuid)
+                move_to_ws_item.connect("activate", guake.on_populate_move_to_workspace_menu, submenu, terminal_uuid)
+
     menu.show_all()
     return menu
 
@@ -73,6 +93,22 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
     #   https://stackoverflow.com/questions/28465956/
     terminal.context_menu = Gtk.Menu()
     menu = terminal.context_menu
+    
+    customcommands = CustomCommands(settings, callback_object)
+    if customcommands.should_load():
+        submen = customcommands.build_menu()
+        if submen:
+            mi = Gtk.MenuItem(_("Custom Commands"))
+            mi.set_submenu(submen)
+            menu.add(mi)
+            menu.add(Gtk.SeparatorMenuItem())
+
+    # add editor
+    mi = Gtk.MenuItem(_("Edit command..."))
+    mi.connect("activate", callback_object.on_edit_command)
+    menu.add(mi)
+    menu.add(Gtk.SeparatorMenuItem())
+
     mi = Gtk.MenuItem(_("Copy"))
     mi.connect("activate", callback_object.on_copy_clipboard)
     menu.add(mi)
@@ -166,14 +202,7 @@ def mk_terminal_context_menu(terminal, window, settings, callback_object):
     else:
         mi.set_sensitive(False)
     menu.add(mi)
-    customcommands = CustomCommands(settings, callback_object)
-    if customcommands.should_load():
-        submen = customcommands.build_menu()
-        if submen:
-            menu.add(Gtk.SeparatorMenuItem())
-            mi = Gtk.MenuItem(_("Custom Commands"))
-            mi.set_submenu(submen)
-            menu.add(mi)
+
     menu.add(Gtk.SeparatorMenuItem())
     mi = Gtk.ImageMenuItem("gtk-preferences")
     mi.set_use_stock(True)

@@ -219,6 +219,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
                     "type": btype,
                     "directory": directory,
                     "custom_colors": box.terminal.get_custom_colors_dict(),
+                    "uuid": str(box.terminal.uuid),
                 }
             )
 
@@ -277,7 +278,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
                 box.unset_terminal()
 
             # Replace term in the TerminalBox
-            term = self.get_notebook().terminal_spawn(cur["directory"])
+            term = self.get_notebook().terminal_spawn(cur["directory"], terminal_uuid=cur.get("uuid"))
             term.set_custom_colors_from_dict(cur.get("custom_colors", None))
             box.set_terminal(term)
             self.get_notebook().terminal_attached(term)

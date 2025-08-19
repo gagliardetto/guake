@@ -1,7 +1,8 @@
 import gi
+import re
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio
 from gi.repository import Vte
@@ -192,33 +193,74 @@ class SaveTerminalDialog(Gtk.FileChooserDialog):
 
 
 class MyListBoxRow(Gtk.ListBoxRow):
-    def __init__(self, tab_label, tab_cwd, page_index):
+    def __init__(self, tab_label, tab_cwd, page_index, workspace_id, workspace_name):
         super().__init__()
         self.page_index = page_index
+        self.workspace_id = workspace_id
+        self.workspace_name = workspace_name
+        # Store the text for filtering to make it independent of the widget hierarchy
+        self.tab_label_text = tab_label
+        self.tab_cwd_text = tab_cwd
 
+        # Use a Grid for a more structured and organized layout
         grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_margin_start(20)  # Adds 20 pixels of padding to the start of the grid
-        grid.set_margin_end(20)    # Adds 20 pixels of padding to the end of the grid
+        grid.set_column_spacing(15)
+        grid.set_row_spacing(5)
+        grid.set_margin_start(12)
+        grid.set_margin_end(12)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
 
-        label = Gtk.Label()
-        label.set_markup(f"<span font_desc='Iosevka, Arial, Helvetica, sans-serif Bold 15'>{tab_label}</span>")
-        label.set_xalign(0)
-        label.set_hexpand(True)
+        # Tab Label (Primary Info)
+        self.label = Gtk.Label()
+        self.label.set_xalign(0)
+        self.label.set_hexpand(True)
 
-        cwd = Gtk.Label()
-        cwd.set_markup(f"<span font_desc='Iosevka Term, Arial, Helvetica, sans-serif 15'>{tab_cwd}</span>")
-        cwd.set_xalign(1)
-        cwd.set_hexpand(True)
-        cwd.set_ellipsize(Pango.EllipsizeMode.START)
+        # Workspace Label (Secondary Info, right-aligned)
+        self.ws_label = Gtk.Label()
+        self.ws_label.set_xalign(1)
 
-        grid.attach(label, 0, 0, 1, 1)
-        grid.attach_next_to(cwd, label, Gtk.PositionType.RIGHT, 1, 1)
+        # CWD Label (Tertiary Info)
+        self.cwd_label = Gtk.Label()
+        self.cwd_label.set_xalign(0)
+        self.cwd_label.set_hexpand(True)
+        self.cwd_label.set_ellipsize(Pango.EllipsizeMode.START)
+
+        # Set initial text with default styling
+        self.update_highlighting(None)
+        self.ws_label.set_markup(f"<span foreground='gray'>{GLib.markup_escape_text(self.workspace_name)}</span>")
+
+        # Attach widgets to the grid layout
+        grid.attach(self.label, 0, 0, 1, 1)      # (child, col, row, width, height)
+        grid.attach(self.ws_label, 1, 0, 1, 1)
+        grid.attach(self.cwd_label, 0, 1, 2, 1)  # CWD spans both columns on the second row
 
         self.add(grid)
 
+    def update_highlighting(self, filter_text):
+        """Updates the Pango markup to highlight text matching the filter."""
+        def highlight(text, base_markup):
+            escaped_original = GLib.markup_escape_text(text)
+            if not filter_text:
+                return base_markup.format(text=escaped_original)
+
+            # Underline the matching text
+            highlighted = re.sub(f'({re.escape(filter_text)})',
+                                 r'<u>\1</u>',
+                                 escaped_original,
+                                 flags=re.IGNORECASE)
+            return base_markup.format(text=highlighted)
+
+        # Define base markup templates for styling
+        label_markup = "<span size='large'><b>{text}</b></span>"
+        cwd_markup = "<span size='large'>{text}</span>"
+
+        self.label.set_markup(highlight(self.tab_label_text, label_markup))
+        self.cwd_label.set_markup(highlight(self.tab_cwd_text, cwd_markup))
+
+
 class QuickTabNavigationDialog(Gtk.Dialog):
-    def __init__(self, window, notebook_manager):
+    def __init__(self, window, notebook_manager, workspace_manager):
         super().__init__(
             _("Quick Tab Navigation"),
             window,
@@ -227,9 +269,12 @@ class QuickTabNavigationDialog(Gtk.Dialog):
              Gtk.STOCK_OK, Gtk.ResponseType.OK)
         )
 
+        self.notebook_manager = notebook_manager
+        self.workspace_manager = workspace_manager
         self.entry = Gtk.Entry()
         self.list_box = Gtk.ListBox()
-        self.selected_page = None
+        self.selected_item = None
+        self.count_label = Gtk.Label()
 
         screen = Gdk.Screen.get_default()
         screen_width = screen.get_width()
@@ -237,24 +282,26 @@ class QuickTabNavigationDialog(Gtk.Dialog):
 
         four_fifths_width = screen_width // 5 * 4
         one_third_height = screen_height // 3
-        row_height = 30  # Assumed height for each row
+        row_height = 30
 
         min_height = one_third_height + row_height
 
-        # Set minimum width of the dialog to one-third of the screen width
         self.set_default_size(four_fifths_width, -1)
 
-        # Create a scrolled window
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scrolled_window.add(self.list_box)
         scrolled_window.set_min_content_height(min_height)
 
-        self.entry.set_placeholder_text("Search or filter tabs...")
+        self.entry.set_placeholder_text("Search or filter tabs (w:workspace)...")
         self.entry.set_hexpand(True)
 
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header_box.pack_start(self.entry, True, True, 0)
+        header_box.pack_start(self.count_label, False, False, 0)
+
         box = self.get_content_area()
-        box.add(self.entry)
+        box.add(header_box)
         box.add(scrolled_window)
 
         self.entry.connect("changed", self.on_entry_changed)
@@ -263,82 +310,156 @@ class QuickTabNavigationDialog(Gtk.Dialog):
         self.list_box.connect("row-selected", self.on_row_selected)
         self.list_box.connect("row-activated", self.on_row_activated)
 
-        page_index = 0
-
-        # Populate list_box
-        for notebook in notebook_manager.iter_notebooks():
-            for terminal in notebook.iter_terminals():
-                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
-                tab_cwd = terminal.get_current_directory() 
-
-                row = MyListBoxRow(tab_label, tab_cwd, page_index)
-                self.list_box.add(row)
-
-                page_index += 1
-
+        self.populate_list()
         self.show_all()
         self.visible_rows = []
         self.update_visible_rows()
 
+    def populate_list(self):
+        term_to_ws = {}
+        for ws in self.workspace_manager.get_all_workspaces():
+            for term_uuid in ws.get("terminals", []):
+                term_to_ws[term_uuid] = ws
+
+        page_index = 0
+        for notebook in self.notebook_manager.iter_notebooks():
+            for terminal in notebook.iter_terminals():
+                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
+                tab_cwd = terminal.get_current_directory()
+                
+                ws = term_to_ws.get(str(terminal.uuid))
+                ws_name = ws['name'] if ws else "Unknown"
+                ws_id = ws['id'] if ws else None
+
+                row = MyListBoxRow(tab_label, tab_cwd, page_index, ws_id, ws_name)
+                self.list_box.add(row)
+                page_index += 1
 
     def on_entry_changed(self, widget):
-        filter_text = widget.get_text().lower()
+        full_filter_text = widget.get_text().lower()
+        
+        ws_filter_match = re.search(r'w:(\S*)', full_filter_text)
+        ws_filter = ws_filter_match.group(1) if ws_filter_match else None
+        
+        text_filter = re.sub(r'w:\S*\s*', '', full_filter_text).strip()
+
         for row in self.list_box.get_children():
-            hbox = row.get_child()
-            label, cwd = hbox.get_children()
-            label_text = label.get_text().lower()
-            cwd_text = cwd.get_text().lower()
+            # Filter using the stored text attributes on the row object for robustness
+            label_text = row.tab_label_text.lower()
+            cwd_text = row.tab_cwd_text.lower()
+            ws_text = row.workspace_name.lower()
 
-            if filter_text in label_text or filter_text in cwd_text:
-                row.show()
-            else:
-                row.hide()
+            ws_match = not ws_filter or ws_filter in ws_text
+            text_match = not text_filter or text_filter in label_text or text_filter in cwd_text
+
+            is_visible = ws_match and text_match
+            row.set_visible(is_visible)
+            
+            # Update highlighting based on the text filter for visible rows
+            row.update_highlighting(text_filter if is_visible else None)
+
         self.update_visible_rows()
-
 
     def update_visible_rows(self):
         self.visible_rows = [row for row in self.list_box.get_children() if row.is_visible()]
+        total_rows = len(self.list_box.get_children())
+        visible_count = len(self.visible_rows)
+        self.count_label.set_markup(f"<small>{visible_count}/{total_rows}</small>")
         
     def on_key_press_on_row(self, widget, event):
-        filter_text = self.entry.get_text()
         selected_row = self.list_box.get_selected_row()
         if event.keyval == Gdk.KEY_Return:
-            self.selected_page = self.get_selected_page()
-            self.response(Gtk.ResponseType.OK)
+            self.on_row_activated(self.list_box, selected_row)
         elif event.keyval == Gdk.KEY_Up:
             if selected_row and self.visible_rows and selected_row == self.visible_rows[0]:
                 self.list_box.unselect_row(selected_row)
                 self.entry.grab_focus()
                 self.entry.set_position(-1)
-        elif event.keyval == Gdk.KEY_Down:
-            if not filter_text and self.visible_rows:  # Filter box empty
-                if selected_row == self.visible_rows[-1]:
-                    return  # Prevent going past the last item
-                self.list_box.select_row(self.visible_rows[0])
-            elif filter_text and not self.visible_rows:  # No matches for filter
-                self.entry.grab_focus()
-                self.entry.set_position(-1)
-
-    def get_selected_page(self):
-        selected_row = self.list_box.get_selected_row()
-        if selected_row:
-            page_num = selected_row.page_index
-        return None
 
     def on_row_selected(self, listbox, row):
         if row:
-            self.selected_page = row.page_index
+            self.selected_item = {'page_index': row.page_index, 'workspace_id': row.workspace_id}
     
-    def get_selected_page(self):
-        return self.selected_page
+    def get_selection(self):
+        return self.selected_item
 
     def on_row_activated(self, listbox, row):
-        self.selected_page = row.page_index
+        self.selected_item = {'page_index': row.page_index, 'workspace_id': row.workspace_id}
         self.response(Gtk.ResponseType.OK)
 
     def on_entry_key_press(self, widget, event):
         if event.keyval == Gdk.KEY_Return:
             if len(self.visible_rows) == 1:
                 self.list_box.select_row(self.visible_rows[0])
-                self.selected_page = self.visible_rows[0].page_index
-                self.response(Gtk.ResponseType.OK)
+                self.on_row_activated(self.list_box, self.visible_rows[0])
+        elif event.keyval == Gdk.KEY_Down:
+            if self.visible_rows:
+                self.list_box.select_row(self.visible_rows[0])
+                self.list_box.grab_focus()
+        elif event.keyval == Gdk.KEY_Escape:
+            self.response(Gtk.ResponseType.CANCEL)
+
+class NewWorkspacePlaceholder(Gtk.Box):
+    def __init__(self, guake_app, workspace_id):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.guake_app = guake_app
+        self.workspace_id = workspace_id
+
+        self.set_vexpand(True)
+        self.set_hexpand(True)
+
+        # Apply the full-size transparent background to this widget
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            .new-workspace-placeholder {
+                background-color: rgba(30, 30, 30, 0.9);
+            }
+        """)
+        self.get_style_context().add_class("new-workspace-placeholder")
+        self.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        # A box to center the content
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        content_box.set_halign(Gtk.Align.CENTER)
+        content_box.set_valign(Gtk.Align.CENTER)
+        
+        label = Gtk.Label(label="This is a new workspace.\nWhat would you like to do next?")
+        label.set_justify(Gtk.Justification.CENTER)
+        
+        # Style the label for better visibility on a dark background
+        label_css = Gtk.CssProvider()
+        label_css.load_from_data(b"label { color: white; font-size: 1.2em; }")
+        label.get_style_context().add_provider(label_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        content_box.pack_start(label, False, False, 10)
+
+        new_term_button = Gtk.Button.new_with_label("Create a new terminal")
+        new_term_button.connect("clicked", self.on_create_terminal_clicked)
+        
+        # Style the button for the dark theme
+        button_css = Gtk.CssProvider()
+        button_css.load_from_data(b"""
+            button { 
+                font-size: 1.1em; 
+                padding: 10px 20px;
+                border-radius: 5px;
+                border: 1px solid #555;
+                background-image: none;
+                background-color: #333;
+                color: white;
+            }
+            button:hover {
+                background-color: #444;
+            }
+            button:active {
+                background-color: #222;
+            }
+        """)
+        new_term_button.get_style_context().add_provider(button_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        content_box.pack_start(new_term_button, False, False, 0)
+
+        self.pack_start(content_box, True, True, 0)
+
+    def on_create_terminal_clicked(self, widget):
+        self.guake_app.add_tab_to_workspace(self.workspace_id)
