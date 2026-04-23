@@ -48,6 +48,9 @@ class InlineEditor(Gtk.Revealer):
         self._history_mtime = 0   # mtime of last loaded history file
         self._history_path = None # path to the history file
         self._ghost_text = None   # current ghost suggestion (suffix only)
+        self._ghost_matches = []  # all matching commands for current input
+        self._ghost_match_index = -1  # current position in matches
+        self._ghost_search_text = None  # user's original search text
         self._inhibit_ghost = False  # prevent re-entrant ghost updates
 
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
@@ -347,8 +350,12 @@ class InlineEditor(Gtk.Revealer):
             self.dismiss()
             return True
 
-        # Up/Down on single-line → history navigation
+        # Up/Down → cycle through ghost matches, or history navigation
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and self._is_single_line():
+            if self._ghost_matches:
+                direction = -1 if keyval == Gdk.KEY_Up else 1
+                self._cycle_ghost(direction)
+                return True
             self._clear_ghost()
             self._navigate_history(keyval == Gdk.KEY_Up)
             return True
@@ -503,6 +510,8 @@ class InlineEditor(Gtk.Revealer):
 
     def _get_user_text(self):
         """Get only the user-typed text (excluding ghost suggestion)."""
+        if self._ghost_search_text is not None:
+            return self._ghost_search_text
         start = self.buffer.get_start_iter()
         end = self.buffer.get_end_iter()
         full = self.buffer.get_text(start, end, False)
@@ -519,7 +528,14 @@ class InlineEditor(Gtk.Revealer):
         return self.buffer.get_end_iter()
 
     def _clear_ghost(self):
-        """Remove any ghost text from the buffer."""
+        """Remove ghost text and reset all ghost match state."""
+        self._clear_ghost_display()
+        self._ghost_matches = []
+        self._ghost_match_index = -1
+        self._ghost_search_text = None
+
+    def _clear_ghost_display(self):
+        """Remove ghost text from the buffer (keeps match list for cycling)."""
         if self._ghost_text:
             self._inhibit_ghost = True
             user_end = self._get_user_text_end()
@@ -528,66 +544,113 @@ class InlineEditor(Gtk.Revealer):
             self._ghost_text = None
             self._inhibit_ghost = False
 
+    def _build_matches(self, query):
+        """Build a list of matching history entries: prefix matches first,
+        then substring matches. Most recent entries come first in each group."""
+        if len(query) < 2:
+            return []
+
+        query_lower = query.lower()
+        prefix_matches = []
+        contains_matches = []
+
+        # Search session history first, then shell history
+        all_history = list(self._history) + list(self._shell_history)
+
+        seen = set()
+        for entry in reversed(all_history):
+            if entry in seen or entry == query:
+                continue
+            seen.add(entry)
+            entry_lower = entry.lower()
+            if entry_lower.startswith(query_lower):
+                prefix_matches.append(entry)
+            elif query_lower in entry_lower:
+                contains_matches.append(entry)
+
+        return prefix_matches + contains_matches
+
     def _update_ghost(self):
-        """Find the best matching history entry and show it as ghost text."""
+        """Find matching history entries and show the best one as ghost text."""
         if not self._active:
             return False
 
         # Get user text without existing ghost
         user_text = self._get_user_text()
 
-        # Clear old ghost first
-        self._clear_ghost()
+        # Clear old ghost display
+        self._clear_ghost_display()
 
-        # Only suggest if there's some input (at least 2 chars)
-        if len(user_text) < 2:
-            return False
-
-        # Don't suggest during history navigation
+        # Don't suggest during old-style history navigation
         if self._history_index != -1:
             return False
 
-        # Search recent history (reverse order — most recent first)
-        suggestion = None
-        # Check local session history first, then shell history
-        for history in (reversed(self._history), reversed(self._shell_history)):
-            for entry in history:
-                if entry.startswith(user_text) and entry != user_text:
-                    suggestion = entry
-                    break
-            if suggestion:
-                break
+        # Build matches
+        matches = self._build_matches(user_text)
+        if not matches:
+            self._ghost_matches = []
+            self._ghost_match_index = -1
+            self._ghost_search_text = None
+            return False
 
-        if suggestion:
-            # Insert the suffix as ghost text
-            suffix = suggestion[len(user_text):]
-            self._inhibit_ghost = True
-            end = self.buffer.get_end_iter()
-            self.buffer.insert(end, suffix)
-            # Apply ghost tag to the suffix
-            ghost_start = self.buffer.get_end_iter()
-            ghost_start.backward_chars(len(suffix))
-            ghost_end = self.buffer.get_end_iter()
-            self.buffer.apply_tag(self._ghost_tag, ghost_start, ghost_end)
-            # Move cursor back to before the ghost text
-            self.buffer.place_cursor(ghost_start)
-            self._ghost_text = suffix
-            self._inhibit_ghost = False
+        self._ghost_matches = matches
+        self._ghost_match_index = 0
+        self._ghost_search_text = user_text
+        self._show_ghost_match(user_text, matches[0])
 
         return False  # one-shot idle
 
-    def _accept_ghost(self):
-        """Accept the ghost suggestion — make it real text."""
-        if not self._ghost_text:
-            return
-        suffix = self._ghost_text
-        self._ghost_text = None
+    def _show_ghost_match(self, user_text, match):
+        """Display a matched command as ghost text in the buffer."""
         self._inhibit_ghost = True
-        # Remove the ghost tag from the text (keep the text, remove styling)
-        start = self.buffer.get_start_iter()
+        match_lower = match.lower()
+        user_lower = user_text.lower()
+
+        if match_lower.startswith(user_lower):
+            # Prefix match — show just the suffix
+            suffix = match[len(user_text):]
+        else:
+            # Substring match — show " → full_command"
+            suffix = "  →  " + match
+
         end = self.buffer.get_end_iter()
-        self.buffer.remove_tag(self._ghost_tag, start, end)
-        # Place cursor at end
+        self.buffer.insert(end, suffix)
+        ghost_start = self.buffer.get_end_iter()
+        ghost_start.backward_chars(len(suffix))
+        ghost_end = self.buffer.get_end_iter()
+        self.buffer.apply_tag(self._ghost_tag, ghost_start, ghost_end)
+        self.buffer.place_cursor(ghost_start)
+        self._ghost_text = suffix
+        self._inhibit_ghost = False
+
+    def _cycle_ghost(self, direction):
+        """Cycle through ghost matches. direction: 1=next(down), -1=prev(up)."""
+        if not self._ghost_matches:
+            return False
+
+        new_index = self._ghost_match_index + direction
+        if new_index < 0 or new_index >= len(self._ghost_matches):
+            return False
+
+        self._ghost_match_index = new_index
+        user_text = self._ghost_search_text
+
+        # Clear current ghost display and show the new match
+        self._clear_ghost_display()
+        self._show_ghost_match(user_text, self._ghost_matches[new_index])
+        return True
+
+    def _accept_ghost(self):
+        """Accept the ghost suggestion — replace buffer with full matched command."""
+        if not self._ghost_matches or self._ghost_match_index < 0:
+            return
+        matched = self._ghost_matches[self._ghost_match_index]
+        self._ghost_text = None
+        self._ghost_matches = []
+        self._ghost_match_index = -1
+        self._ghost_search_text = None
+        self._inhibit_ghost = True
+        self.buffer.set_text(matched)
         self.buffer.place_cursor(self.buffer.get_end_iter())
         self._inhibit_ghost = False
 
