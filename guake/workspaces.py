@@ -145,6 +145,10 @@ class WorkspaceManager:
     def _save_workspaces_now(self):
         """Immediately writes workspace data to disk."""
         self._save_timer_id = None
+        # Don't save during background tab restore — workspace data is incomplete
+        if getattr(self.guake_app, '_pending_restore_tabs', None):
+            log.debug("Skipping workspace save — background restore in progress")
+            return False
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             data_to_save = self.workspaces_data.copy()

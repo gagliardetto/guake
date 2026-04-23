@@ -310,12 +310,13 @@ class Guake(SimpleGladeApp):
         if self.settings.general.get_boolean("restore-tabs-startup"):
             self.restore_tabs(suppress_notify=True)
 
-        # After tabs are restored, get their UUIDs and validate the workspace data.
-        all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
-        self.workspace_manager.validate_loaded_workspaces(all_uuids)
-
-        # Now reconcile any terminals that were in the session but not in workspaces.json
-        self.workspace_manager.reconcile_orphan_tabs()
+        # Validate and reconcile workspace data ONLY if there's no
+        # background restore pending. If there is, these run after all
+        # background tabs are loaded (in _restore_next_background_tab).
+        if not getattr(self, '_pending_restore_tabs', None):
+            all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+            self.workspace_manager.validate_loaded_workspaces(all_uuids)
+            self.workspace_manager.reconcile_orphan_tabs()
 
         initial_workspace_id = self.workspace_manager.workspaces_data.get("active_workspace")
         if initial_workspace_id and self.workspace_manager.get_workspace_by_id(initial_workspace_id):
@@ -1105,6 +1106,10 @@ class Guake(SimpleGladeApp):
     def _save_tabs_now(self, filename="session.json"):
         """Immediately writes tab session data to disk."""
         self._save_tabs_timer_id = None
+        # Don't save during background tab restore — session is incomplete
+        if getattr(self, '_pending_restore_tabs', None):
+            log.debug("Skipping tab save — background restore in progress")
+            return False
         config = {"schema_version": TABS_SESSION_SCHEMA_VERSION, "timestamp": int(pytime.time()), "workspace": {}}
         for key, nb in self.notebook_manager.get_notebooks().items():
             tabs = []
@@ -1260,8 +1265,10 @@ class Guake(SimpleGladeApp):
     def _restore_next_background_tab(self):
         """Restore one tab in the background per idle cycle."""
         if self._pending_restore_index >= len(self._pending_restore_tabs):
-            # All done — reconcile and clear loading indicators
+            # All done — validate workspaces, reconcile, clear loading indicators
             if self.workspace_manager:
+                all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+                self.workspace_manager.validate_loaded_workspaces(all_uuids)
                 self.workspace_manager.reconcile_orphan_tabs(self._pending_session_uuids)
                 if hasattr(self.workspace_manager, 'set_loading_workspaces'):
                     self.workspace_manager.set_loading_workspaces(set())
