@@ -74,6 +74,32 @@ def _find_ancestor(widget, method_name):
         parent = parent.get_parent()
     return None
 
+
+class TerminalHolderChild:
+    """Mixin for widgets that live inside a TerminalHolder hierarchy
+    (TerminalBox, DualTerminalBox). Provides parent-traversal methods
+    that safely skip intermediate GTK containers."""
+
+    def get_guake(self):
+        a = _find_ancestor(self, 'get_guake')
+        return a.get_guake() if a else None
+
+    def get_window(self):
+        a = _find_ancestor(self, 'get_window')
+        return a.get_window() if a else None
+
+    def get_settings(self):
+        a = _find_ancestor(self, 'get_settings')
+        return a.get_settings() if a else None
+
+    def get_root_box(self):
+        a = _find_ancestor(self, 'get_root_box')
+        return a.get_root_box() if a else None
+
+    def get_notebook(self):
+        a = _find_ancestor(self, 'get_notebook')
+        return a.get_notebook() if a else None
+
 import cairo
 import random
 import string
@@ -584,7 +610,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             self.on_search_next_clicked(None)
 
 
-class TerminalBox(Gtk.Box, TerminalHolder):
+class TerminalBox(Gtk.Box, TerminalHolder, TerminalHolderChild):
 
     """A box to group the terminal and a scrollbar."""
 
@@ -903,26 +929,6 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
         return dual_terminal_box
 
-    def get_guake(self):
-        ancestor = _find_ancestor(self, 'get_guake')
-        return ancestor.get_guake() if ancestor else None
-
-    def get_window(self):
-        ancestor = _find_ancestor(self, 'get_window')
-        return ancestor.get_window() if ancestor else None
-
-    def get_settings(self):
-        ancestor = _find_ancestor(self, 'get_settings')
-        return ancestor.get_settings() if ancestor else None
-
-    def get_root_box(self):
-        ancestor = _find_ancestor(self, 'get_root_box')
-        return ancestor.get_root_box() if ancestor else None
-
-    def get_notebook(self):
-        ancestor = _find_ancestor(self, 'get_notebook')
-        return ancestor.get_notebook() if ancestor else None
-
     def remove_dead_child(self, child):
         log.warning("remove_dead_child called on TerminalBox, which has no child to remove")
 
@@ -969,7 +975,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         return False
 
 
-class DualTerminalBox(Gtk.Paned, TerminalHolder):
+class DualTerminalBox(Gtk.Paned, TerminalHolder, TerminalHolderChild):
 
     ORIENT_H = 0
     ORIENT_V = 1
@@ -1013,26 +1019,6 @@ class DualTerminalBox(Gtk.Paned, TerminalHolder):
             self.set_child_second(new)
         else:
             log.error("DualTerminalBox.replace_child: unknown child widget")
-
-    def get_guake(self):
-        ancestor = _find_ancestor(self, 'get_guake')
-        return ancestor.get_guake() if ancestor else None
-
-    def get_window(self):
-        ancestor = _find_ancestor(self, 'get_window')
-        return ancestor.get_window() if ancestor else None
-
-    def get_settings(self):
-        ancestor = _find_ancestor(self, 'get_settings')
-        return ancestor.get_settings() if ancestor else None
-
-    def get_root_box(self):
-        ancestor = _find_ancestor(self, 'get_root_box')
-        return ancestor.get_root_box() if ancestor else None
-
-    def get_notebook(self):
-        ancestor = _find_ancestor(self, 'get_notebook')
-        return ancestor.get_notebook() if ancestor else None
 
     def grab_box_terminal_focus(self, box):
         if isinstance(box, DualTerminalBox):

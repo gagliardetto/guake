@@ -182,6 +182,7 @@ class Guake(SimpleGladeApp):
         self.hidden = True
         self.forceHide = False
         self.is_restoring_session = False
+        self._pending_restore_tabs = None  # set during background restore
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
         self.new_workspace_placeholder = None
