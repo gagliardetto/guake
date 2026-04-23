@@ -738,17 +738,24 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
     def _draw_viewfinder(self, cr, width, height):
         adj = self.terminal.get_vadjustment()
-        total_rows = adj.get_upper()
         first_visible_row = adj.get_value()
         page_size = adj.get_page_size()
 
-        if total_rows <= 0:
+        # Use the same line count as the content surface for consistent mapping
+        total_lines = len(self._minimap_line_lengths) if self._minimap_line_lengths else 0
+        if total_lines <= 0:
             return
 
-        # Map the terminal's visible region onto the minimap's pixel space
-        scale = height / total_rows if total_rows > 0 else 1.0
+        rh = self.MINIMAP_ROW_HEIGHT
+        visible_rows = max(int(height / rh), 1)
+
+        # Content occupies this many pixels (may be less than full height)
+        content_pixel_height = min(total_lines, visible_rows) * rh
+
+        # Map terminal scroll position to content pixel space
+        scale = content_pixel_height / total_lines
         vf_top = first_visible_row * scale
-        vf_height = max(page_size * scale, 4)  # minimum 4px so it's always visible
+        vf_height = max(page_size * scale, 4)
 
         cr.set_source_rgba(1, 1, 1, 0.25)
         cr.rectangle(0, vf_top, width, vf_height)
