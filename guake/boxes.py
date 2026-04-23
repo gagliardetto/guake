@@ -63,12 +63,13 @@ class TerminalHolder:
 
 
 def _find_ancestor(widget, method_name):
-    """Walk up the widget tree to find the nearest ancestor that has the given method.
-    Handles intermediate container widgets (like Gtk.Overlay) that don't implement
-    TerminalHolder methods."""
+    """Walk up the widget tree to find the nearest TerminalHolder ancestor
+    that has the given method. Skips plain GTK containers (like Gtk.Overlay)
+    which may have identically-named methods (e.g. Gtk.Widget.get_settings,
+    Gtk.Widget.get_window) that return the wrong type."""
     parent = widget.get_parent()
     while parent is not None:
-        if hasattr(parent, method_name):
+        if isinstance(parent, TerminalHolder) and hasattr(parent, method_name):
             return parent
         parent = parent.get_parent()
     return None
@@ -389,7 +390,9 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             if not self.inline_editor.is_active:
                 self.inline_editor.activate()
         else:
-            # Mouse away from bottom — schedule hide (unless editor has focus)
+            # Mouse away from bottom — reset dismissed flag so next hover works
+            self.inline_editor.reset_dismissed()
+            # Schedule hide (unless editor has focus)
             if self.inline_editor.is_active and not self.inline_editor.view.has_focus():
                 if not self._editor_hide_timer:
                     self._editor_hide_timer = GLib.timeout_add(
