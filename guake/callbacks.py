@@ -52,8 +52,6 @@ class TerminalContextMenuCallbacks:
                 # If the content is empty, we do not run it in the terminal
                 print("No content to run.")
                 return
-            print("Clearing terminal input and running command...")
-            self.terminal.clear_input()
             log.info("Running command in terminal: %s", raw_content)
             self.terminal.execute_command(raw_content)
         elif response_id == Gtk.ResponseType.CANCEL:
@@ -73,6 +71,8 @@ class TerminalContextMenuCallbacks:
         log.info("Current input in terminal: %s", terminal_input)
         dialog.set_initial_content(terminal_input)
         dialog.connect("response", self.on_dialog_response)
+        print("Clearing terminal input...")
+        self.terminal.clear_input()
         response = dialog.show()
 
     def on_save_to_clipboard(self, *args):

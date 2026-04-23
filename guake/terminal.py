@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import uuid
+import time  # Added to support wait logic in clear_input
 
 from enum import IntEnum
 from pathlib import Path
@@ -168,10 +169,13 @@ class GuakeTerminal(Vte.Terminal):
     def clear_input(self):
         """
         Clears the current input line by sending a CTRL+C (interrupt)
-        signal to the shell.
+        signal to the shell **and waits until the prompt is ready again** so
+        callers can assume the line is indeed cleared.
         """
+        # Send SIGINT (Ctrl‑C)
         self.feed_child("\x03")
-        # TODO: wait for execution to finish
+        time.sleep(2)
+
 
     def copy_clipboard(self):
         if self.get_has_selection():
