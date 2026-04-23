@@ -166,6 +166,8 @@ class InlineEditor(Gtk.Revealer):
         self._active = False
         self.clear_cursors()
         self.set_reveal_child(False)
+        # Return focus to the terminal so Ctrl+C, scrolling, etc. work
+        self.terminal.grab_focus()
 
     def _grab_focus(self):
         if self._active:
@@ -208,6 +210,8 @@ class InlineEditor(Gtk.Revealer):
     # ---- Key handling ----
 
     def _on_key_press(self, view, event):
+        if not self._active:
+            return False  # Editor hidden — don't intercept anything
         keyval = event.keyval
         state = event.state & Gtk.accelerator_get_default_mod_mask()
 
@@ -391,6 +395,8 @@ class InlineEditor(Gtk.Revealer):
     # ---- Ctrl+Click ----
 
     def _on_button_press(self, view, event):
+        if not self._active:
+            return False
         if event.type == Gdk.EventType.BUTTON_PRESS:
             state = event.state & Gtk.accelerator_get_default_mod_mask()
             if state & Gdk.ModifierType.CONTROL_MASK:
