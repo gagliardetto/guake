@@ -59,6 +59,7 @@ class WorkspaceManager:
         self._is_refreshing_git = False
         self._save_timer_id = None
         self._rebuild_sidebar_id = None
+        self._loading_workspaces = set()  # workspace IDs still loading
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
@@ -431,6 +432,13 @@ class WorkspaceManager:
             git_icon.get_style_context().add_class(f"git-status-{status}")
             row_box.pack_end(git_icon, False, False, 0)
 
+        # Show spinner if this workspace is still loading
+        if ws_data["id"] in self._loading_workspaces:
+            spinner = Gtk.Spinner()
+            spinner.start()
+            spinner.set_tooltip_text("Loading terminals...")
+            row_box.pack_end(spinner, False, False, 0)
+
         return list_box_row
 
     def on_row_enter(self, widget, event):
@@ -438,6 +446,18 @@ class WorkspaceManager:
         display = widget.get_display()
         hand_cursor = Gdk.Cursor.new_for_display(display, Gdk.CursorType.HAND2)
         widget.get_window().set_cursor(hand_cursor)
+
+    def set_loading_workspaces(self, ws_ids):
+        """Mark workspaces as loading (show spinner in sidebar)."""
+        self._loading_workspaces = set(ws_ids)
+        self._build_workspace_list()
+
+    def update_loading_progress(self, completed, total):
+        """Called after each background tab restore. When all done,
+        clears loading indicators."""
+        if completed >= total:
+            self._loading_workspaces.clear()
+            self._build_workspace_list()
 
     def on_row_leave(self, widget, event):
         """Change cursor back to default."""

@@ -1139,64 +1139,145 @@ class Guake(SimpleGladeApp):
             return
         if config.get("schema_version", 0) > TABS_SESSION_SCHEMA_VERSION: return
 
-        # 1. Get all UUIDs from session file first
+        # 1. Collect all tabs and build a UUID → tab mapping
+        all_tabs = []
         all_session_uuids = set()
         for key, frames in config.get("workspace", {}).items():
             for tabs in frames:
                 for tab in tabs:
+                    all_tabs.append((int(key), tab))
                     if tab.get("panes"):
                         for pane in tab["panes"]:
                             if pane.get("uuid"):
                                 all_session_uuids.add(pane["uuid"])
 
-        # 2. Hide notebook and set restoring flag
+        # 2. Figure out which tabs belong to which workspace
+        active_ws_id = self.workspace_manager.workspaces_data.get("active_workspace")
+        ws_terminal_map = {}  # workspace_id → set of terminal UUIDs
+        for ws in self.workspace_manager.get_all_workspaces():
+            ws_terminal_map[ws["id"]] = set(ws.get("terminals", []))
+
+        active_ws_uuids = ws_terminal_map.get(active_ws_id, set())
+
+        def _tab_belongs_to_workspace(tab, ws_uuids):
+            """Check if any pane UUID in this tab belongs to the given workspace."""
+            if tab.get("panes"):
+                return any(p.get("uuid") in ws_uuids for p in tab["panes"])
+            return False
+
+        # Split tabs: active workspace first, rest queued
+        active_tabs = []
+        other_tabs = []
+        for nb_key, tab in all_tabs:
+            if _tab_belongs_to_workspace(tab, active_ws_uuids):
+                active_tabs.append((nb_key, tab))
+            else:
+                other_tabs.append((nb_key, tab))
+
+        # 3. Restore active workspace tabs immediately
         self.is_restoring_session = True
         notebook = self.get_notebook()
-        notebook.hide()
 
         v = self.settings.general.get_boolean("save-tabs-when-changed")
         self.settings.general.set_boolean("save-tabs-when-changed", False)
-
-        active_workspace_id = self.workspace_manager.workspaces_data.get("active_workspace")
         self.workspace_manager.workspaces_data["active_workspace"] = None
 
         try:
-            # 3. Create all tabs
-            for key, frames in config.get("workspace", {}).items():
-                nb = self.notebook_manager.get_notebook(int(key))
-                for _ in range(nb.get_n_pages()): nb.delete_page(0)
-                for tabs in frames:
-                    for tab in tabs:
-                        if tab.get("panes"):
-                            box, _, _ = nb.new_page_with_focus(label=tab["label"], user_set=tab.get("custom_label_set", False), empty=True)
-                            box.restore_box_layout(box.child, tab["panes"])
-                        else:
-                            nb.new_page_with_focus(tab.get("directory"), tab.get("label"), tab.get("custom_label_set", False))
+            nb = self.notebook_manager.get_notebook(0)
+            for _ in range(nb.get_n_pages()):
+                nb.delete_page(0)
+
+            # Restore active workspace tabs
+            for nb_key, tab in active_tabs:
+                self._restore_single_tab(nb_key, tab)
+
         except (KeyError, IndexError, TypeError) as e:
-            log.warning("Failed to restore tabs: %s", e, exc_info=True)
-        finally:
-            self.settings.general.set_boolean("save-tabs-when-changed", v)
-            self.workspace_manager.workspaces_data["active_workspace"] = active_workspace_id
+            log.warning("Failed to restore active workspace tabs: %s", e, exc_info=True)
+
+        self.settings.general.set_boolean("save-tabs-when-changed", v)
+        self.workspace_manager.workspaces_data["active_workspace"] = active_ws_id
+
+        # 4. Show notebook and switch to active workspace immediately
+        notebook.show()
+        self.is_restoring_session = False
+
+        if active_ws_id and self.workspace_manager.get_workspace_by_id(active_ws_id):
+            self.switch_to_workspace(active_ws_id)
+        elif self.workspace_manager.get_all_workspaces():
+            first_ws = next((ws for ws in self.workspace_manager.get_all_workspaces() if not ws.get("is_special")), None)
+            if first_ws:
+                self.workspace_manager.workspaces_data["active_workspace"] = first_ws["id"]
+                self.switch_to_workspace(first_ws["id"])
+
+        # 5. Mark non-active workspaces as loading and queue background restore
+        if other_tabs:
+            self._pending_restore_tabs = other_tabs
+            self._pending_restore_index = 0
+            self._pending_session_uuids = all_session_uuids
+
+            # Mark loading workspaces in sidebar
+            loading_ws_ids = set()
+            for ws_id, uuids in ws_terminal_map.items():
+                if ws_id != active_ws_id and uuids:
+                    loading_ws_ids.add(ws_id)
+            if hasattr(self.workspace_manager, 'set_loading_workspaces'):
+                self.workspace_manager.set_loading_workspaces(loading_ws_ids)
+
+            # Start background restore — one tab per idle cycle
+            GLib.idle_add(self._restore_next_background_tab)
+        else:
+            # All tabs restored, reconcile
+            if self.workspace_manager:
+                self.workspace_manager.reconcile_orphan_tabs(all_session_uuids)
 
         if self.settings.general.get_boolean("restore-tabs-notify") and not suppress_notify:
             notifier.showMessage("Guake Terminal", "Your tabs have been restored!", pixmapfile("guake-notification.png"))
-        
-        # 4. After restoring, reconcile tabs with workspaces using the UUID list
-        if self.workspace_manager:
-            self.workspace_manager.reconcile_orphan_tabs(all_session_uuids)
 
-        # 5. Show notebook, unset flag, and switch to active workspace
-        notebook.show()
-        self.is_restoring_session = False
-        if active_workspace_id and self.workspace_manager.get_workspace_by_id(active_workspace_id):
-            self.switch_to_workspace(active_workspace_id)
-        elif self.workspace_manager.get_all_workspaces():
-             first_ws = next((ws for ws in self.workspace_manager.get_all_workspaces() if not ws.get("is_special")), None)
-             if first_ws:
-                first_ws_id = first_ws["id"]
-                self.workspace_manager.workspaces_data["active_workspace"] = first_ws_id
-                self.workspace_manager.save_workspaces()
-                self.switch_to_workspace(first_ws_id)
+    def _restore_single_tab(self, nb_key, tab):
+        """Restore a single tab from session data."""
+        nb = self.notebook_manager.get_notebook(nb_key)
+        if tab.get("panes"):
+            box, _, _ = nb.new_page_with_focus(
+                label=tab["label"],
+                user_set=tab.get("custom_label_set", False),
+                empty=True)
+            box.restore_box_layout(box.child, tab["panes"])
+        else:
+            nb.new_page_with_focus(
+                tab.get("directory"),
+                tab.get("label"),
+                tab.get("custom_label_set", False))
+
+    def _restore_next_background_tab(self):
+        """Restore one tab in the background per idle cycle."""
+        if self._pending_restore_index >= len(self._pending_restore_tabs):
+            # All done — reconcile and clear loading indicators
+            if self.workspace_manager:
+                self.workspace_manager.reconcile_orphan_tabs(self._pending_session_uuids)
+                if hasattr(self.workspace_manager, 'set_loading_workspaces'):
+                    self.workspace_manager.set_loading_workspaces(set())
+            self._pending_restore_tabs = None
+            self._pending_session_uuids = None
+            log.info("Background tab restore complete")
+            return False  # Stop idle callback
+
+        nb_key, tab = self._pending_restore_tabs[self._pending_restore_index]
+        self._pending_restore_index += 1
+
+        try:
+            was_restoring = self.is_restoring_session
+            self.is_restoring_session = True
+            self._restore_single_tab(nb_key, tab)
+            self.is_restoring_session = was_restoring
+        except Exception as e:
+            log.warning("Failed to restore background tab: %s", e)
+
+        # Update loading state: check which workspaces are now fully loaded
+        if hasattr(self.workspace_manager, 'update_loading_progress'):
+            self.workspace_manager.update_loading_progress(
+                self._pending_restore_index, len(self._pending_restore_tabs))
+
+        return True  # Continue idle callback
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)
