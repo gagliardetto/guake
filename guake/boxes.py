@@ -440,9 +440,13 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
     """A box to group the terminal and a scrollbar."""
 
+    MINIMAP_REFRESH_MS = 250  # max refresh rate for minimap content
+
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.terminal = None
+        self._minimap_refresh_timer_id = None
+        self._minimap_lines_cache = None  # pre-processed lines for drawing
 
     def set_terminal(self, terminal):
         """Packs the terminal widget."""
@@ -536,38 +540,17 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
         # calculate start and stop rows of the minimap
         m_start = 0
-        m_stop = m_page
-        if t_first_visible_row > 0:
+        if t_first_visible_row > 0 and t_range_end > 0:
             ratio = t_first_visible_row / t_range_end
-            m_start = ratio * m_range_end
-            m_stop = m_start + m_page
+            m_start = ratio * max(m_range_end, 0)
 
         starting_row = int(m_start)
 
-        # get terminal width (how many columns are visible, in characters)
-        t_width = self.terminal.get_column_count()
-        
-        if hasattr(self, 'terminal_content'):
-            # Here, implement your logic to represent self.terminal_content
-            # For example, you might simply draw the first few lines
-            lines = self.terminal_content.split('\n')
-            # now check if each line also needs to be split because it's too long
-            final_lines = []
-            for line in lines:
-                if len(line) > t_width:
-                    # split the line
-                    line = [line[i:i+t_width] for i in range(0, len(line), t_width)]
-                    final_lines.extend(line)
-                else:
-                    final_lines.append(line)
-            lines = final_lines
-            
+        if self._minimap_lines_cache:
             drawn_lines = 0
-            for i, line in enumerate(lines):
+            for i, line in enumerate(self._minimap_lines_cache):
                 if i < starting_row:
                     continue
-                # if line == '':
-                #     continue
                 if drawn_lines >= m_page:
                     break
                 y_coordinate = drawn_lines * self.get_minimap_row_height()
@@ -616,16 +599,43 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         cr.fill()
 
     def on_terminal_content_changed(self, terminal, minimap):
-        # Your existing code to get terminal contents
-        output_stream = Gio.MemoryOutputStream.new_resizable()
-        flags = Vte.WriteFlags.DEFAULT
-        self.terminal.write_contents_sync(output_stream, flags, None)
-        output_stream.close()
-        written_data = output_stream.steal_as_bytes()
-        self.terminal_content = written_data.get_data().decode('utf-8')
-        
-        # Invalidate the existing minimap drawing so it will be redrawn
+        """Debounced handler: schedule a minimap refresh instead of reading
+        the entire terminal buffer on every character of output."""
+        if self._minimap_refresh_timer_id is None:
+            self._minimap_refresh_timer_id = GLib.timeout_add(
+                self.MINIMAP_REFRESH_MS, self._do_minimap_refresh
+            )
+
+    def _do_minimap_refresh(self):
+        """Actually read terminal content and update the minimap.
+        Runs at most once per MINIMAP_REFRESH_MS."""
+        self._minimap_refresh_timer_id = None
+        if not self.terminal:
+            return False
+
+        try:
+            output_stream = Gio.MemoryOutputStream.new_resizable()
+            self.terminal.write_contents_sync(output_stream, Vte.WriteFlags.DEFAULT, None)
+            output_stream.close()
+            written_data = output_stream.steal_as_bytes()
+            raw_content = written_data.get_data().decode('utf-8', errors='replace')
+        except Exception:
+            return False
+
+        # Pre-process lines: split by newline and wrap long lines.
+        # Cache the result so on_draw_minimap doesn't redo this work.
+        t_width = self.terminal.get_column_count()
+        processed = []
+        for line in raw_content.split('\n'):
+            if len(line) > t_width:
+                for i in range(0, len(line), t_width):
+                    processed.append(line[i:i + t_width])
+            else:
+                processed.append(line)
+        self._minimap_lines_cache = processed
+
         self.minimap.queue_draw()
+        return False  # one-shot timer
 
     def __scroll_event_cb(self, widget, event):
         # Adjust scrolling speed when adding "shift" or "shift + ctrl"
@@ -664,6 +674,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         pass
 
     def unset_terminal(self, *args):
+        if self._minimap_refresh_timer_id is not None:
+            GLib.source_remove(self._minimap_refresh_timer_id)
+            self._minimap_refresh_timer_id = None
+        self._minimap_lines_cache = None
         self.terminal = None
 
     def split_h(self, split_percentage: int = 50):
