@@ -66,13 +66,20 @@ import random
 import string
 from copy import deepcopy
 
-class RootTerminalBox(Gtk.Overlay, TerminalHolder):
+class RootTerminalBox(Gtk.Box, TerminalHolder):
     def __init__(self, guake, parent_notebook):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.guake = guake
         self.notebook = parent_notebook
         self.child = None
         self.last_terminal_focused = None
+
+        # Internal overlay for terminal + search bar + block decorations
+        self._overlay = Gtk.Overlay()
+        self._overlay.set_hexpand(True)
+        self._overlay.set_vexpand(True)
+        self.pack_start(self._overlay, True, True, 0)
+        self._overlay.show()
 
         # Block support (initialized lazily on first terminal focus)
         self.block_model = None
@@ -84,6 +91,14 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         self.searchstring = None
         self.searchre = None
         self._add_search_box()
+
+    def add_overlay(self, widget):
+        """Delegate to the internal overlay."""
+        self._overlay.add_overlay(widget)
+
+    def set_overlay_pass_through(self, widget, pass_through):
+        """Delegate to the internal overlay."""
+        self._overlay.set_overlay_pass_through(widget, pass_through)
 
     def _add_search_box(self):
         """--------------------------------------|
@@ -181,13 +196,13 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
                 yield t
 
     def replace_child(self, old, new):
-        self.remove(old)
+        self._overlay.remove(old)
         self.set_child(new)
 
     def set_child(self, terminal_holder):
         if isinstance(terminal_holder, TerminalHolder):
             self.child = terminal_holder
-            self.add(self.child)
+            self._overlay.add(self.child)
         else:
             raise RuntimeError(f"Error adding (RootTerminalBox.add({type(terminal_holder)}))")
 
@@ -312,9 +327,9 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
             self.set_overlay_pass_through(self.block_overlay, True)
             self.block_overlay.show()
 
-            # Inline editor (docked at bottom)
+            # Inline editor (docked at bottom of the box — below terminal, no overlap)
             self.inline_editor = InlineEditor(terminal, self.block_model)
-            self.add_overlay(self.inline_editor)
+            self.pack_end(self.inline_editor, False, False, 0)
             self.inline_editor.show_all()
             # Don't reveal yet — wait for prompt_start event
 

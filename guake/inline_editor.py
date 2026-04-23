@@ -42,8 +42,6 @@ class InlineEditor(Gtk.Revealer):
 
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self.set_transition_duration(150)
-        self.set_valign(Gtk.Align.END)
-        self.set_halign(Gtk.Align.FILL)
 
         # -- Container --
         frame = Gtk.Frame()
@@ -207,15 +205,36 @@ class InlineEditor(Gtk.Revealer):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (state & Gdk.ModifierType.SHIFT_MASK):
             return False  # Let GtkSourceView insert a newline
 
+        # Ctrl+V / Ctrl+Shift+V → paste from clipboard
+        if keyval == Gdk.KEY_v and (state & Gdk.ModifierType.CONTROL_MASK):
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            text = clipboard.wait_for_text()
+            if text:
+                self.buffer.insert_at_cursor(text)
+            return True
+
+        # Ctrl+C → copy if selection exists, otherwise clear + SIGINT
+        if keyval == Gdk.KEY_c and (state & Gdk.ModifierType.CONTROL_MASK):
+            if self.buffer.get_has_selection():
+                self.view.emit("copy-clipboard")
+                return True
+            self.buffer.set_text("")
+            self.terminal.feed_child("\x03")
+            return True
+
+        # Ctrl+A → select all
+        if keyval == Gdk.KEY_a and (state & Gdk.ModifierType.CONTROL_MASK):
+            self.buffer.select_range(self.buffer.get_start_iter(), self.buffer.get_end_iter())
+            return True
+
+        # Ctrl+X → cut
+        if keyval == Gdk.KEY_x and (state & Gdk.ModifierType.CONTROL_MASK):
+            self.view.emit("cut-clipboard")
+            return True
+
         # Tab → pass to terminal for shell completion
         if keyval == Gdk.KEY_Tab and not state:
             self._request_completion()
-            return True
-
-        # Ctrl+C → clear editor, send SIGINT
-        if keyval == Gdk.KEY_c and (state & Gdk.ModifierType.CONTROL_MASK):
-            self.buffer.set_text("")
-            self.terminal.feed_child("\x03")
             return True
 
         # Ctrl+D on empty editor → send EOF
@@ -225,7 +244,7 @@ class InlineEditor(Gtk.Revealer):
                 self.terminal.feed_child("\x04")
                 self.deactivate()
                 return True
-            return False  # Ctrl+D with content = multi-cursor (if implemented)
+            return False
 
         # Escape → clear editor, return focus to terminal
         if keyval == Gdk.KEY_Escape:

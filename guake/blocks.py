@@ -93,9 +93,9 @@ class BlockModel:
     def _get_cursor_row(self):
         """Get the terminal's current cursor row (absolute, including scrollback)."""
         try:
-            cursor = self.terminal.get_cursor_position()
+            col, row = self.terminal.get_cursor_position()
             adj = self.terminal.get_vadjustment()
-            return int(adj.get_value()) + cursor.row
+            return int(adj.get_value()) + row
         except Exception:
             return 0
 
