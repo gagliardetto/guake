@@ -95,7 +95,8 @@ class BlockModel:
             col, row = self.terminal.get_cursor_position()
             adj = self.terminal.get_vadjustment()
             return int(adj.get_value()) + row
-        except Exception:
+        except Exception as e:
+            log.debug("Failed to get cursor row: %s", e)
             return 0
 
     def on_prompt_start(self):
@@ -325,7 +326,8 @@ class BlockOverlay:
             char_w = alloc.width / cols
             char_h = alloc.height / rows
             return char_w, char_h
-        except Exception:
+        except Exception as e:
+            log.debug("Failed to get char metrics: %s", e)
             return 8, 16
 
     def _row_to_y(self, absolute_row):

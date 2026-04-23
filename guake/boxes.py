@@ -364,8 +364,8 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                 import json
                 cfg = json.loads(config_path.read_text())
                 self._editor_mode = cfg.get("mode", "hover")
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Could not load inline editor config: %s", e)
 
         try:
             from guake.blocks import BlockModel, BlockOverlay, BlockFIFOReader
@@ -820,7 +820,8 @@ class TerminalBox(Gtk.Box, TerminalHolder, TerminalHolderChild):
             output_stream.close()
             written_data = output_stream.steal_as_bytes()
             raw_content = written_data.get_data().decode('utf-8', errors='replace')
-        except Exception:
+        except Exception as e:
+            log.debug("Minimap content read failed: %s", e)
             return False
 
         # Extract only line lengths (compact int list — no text stored)

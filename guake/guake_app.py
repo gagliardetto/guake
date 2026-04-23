@@ -314,7 +314,7 @@ class Guake(SimpleGladeApp):
         # Validate and reconcile workspace data ONLY if there's no
         # background restore pending. If there is, these run after all
         # background tabs are loaded (in _restore_next_background_tab).
-        if not getattr(self, '_pending_restore_tabs', None):
+        if not self._pending_restore_tabs:
             all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
             self.workspace_manager.validate_loaded_workspaces(all_uuids)
             self.workspace_manager.reconcile_orphan_tabs()
@@ -1108,7 +1108,7 @@ class Guake(SimpleGladeApp):
         """Immediately writes tab session data to disk."""
         self._save_tabs_timer_id = None
         # Don't save during background tab restore — session is incomplete
-        if getattr(self, '_pending_restore_tabs', None):
+        if self._pending_restore_tabs:
             log.debug("Skipping tab save — background restore in progress")
             return False
         config = {"schema_version": TABS_SESSION_SCHEMA_VERSION, "timestamp": int(pytime.time()), "workspace": {}}

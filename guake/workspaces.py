@@ -146,7 +146,7 @@ class WorkspaceManager:
         """Immediately writes workspace data to disk."""
         self._save_timer_id = None
         # Don't save during background tab restore — workspace data is incomplete
-        if getattr(self.guake_app, '_pending_restore_tabs', None):
+        if self.guake_app._pending_restore_tabs:
             log.debug("Skipping workspace save — background restore in progress")
             return False
         try:
