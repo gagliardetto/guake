@@ -170,39 +170,43 @@ class SearchableEmojiSelector(Gtk.Dialog):
         if not isinstance(focus, Gtk.Button):
             return False
 
-        flowbox = focus.get_parent()
+        # Button → FlowBoxChild → FlowBox
+        flowbox_child = focus.get_parent()
+        if not isinstance(flowbox_child, Gtk.FlowBoxChild):
+            return False
+        flowbox = flowbox_child.get_parent()
         if not isinstance(flowbox, Gtk.FlowBox):
             return False
 
-        children = flowbox.get_children()
+        children = flowbox.get_children()  # These are FlowBoxChild wrappers
         if not children:
             return False
 
         try:
-            idx = children.index(focus)
+            idx = children.index(flowbox_child)
         except ValueError:
             return False
 
         if keyval == Gdk.KEY_Right:
             if idx + 1 < len(children):
-                children[idx + 1].grab_focus()
+                children[idx + 1].get_child().grab_focus()
             else:
                 self._navigate_to_adjacent_flowbox(flowbox, "next")
         elif keyval == Gdk.KEY_Left:
             if idx > 0:
-                children[idx - 1].grab_focus()
+                children[idx - 1].get_child().grab_focus()
             else:
                 self._navigate_to_adjacent_flowbox(flowbox, "prev")
         elif keyval == Gdk.KEY_Down:
             items_per_line = flowbox.get_max_children_per_line()
             if idx + items_per_line < len(children):
-                children[idx + items_per_line].grab_focus()
+                children[idx + items_per_line].get_child().grab_focus()
             else:
                 self._navigate_to_adjacent_flowbox(flowbox, "next")
         elif keyval == Gdk.KEY_Up:
             items_per_line = flowbox.get_max_children_per_line()
             if idx - items_per_line >= 0:
-                children[idx - items_per_line].grab_focus()
+                children[idx - items_per_line].get_child().grab_focus()
             else:
                 self._navigate_to_adjacent_flowbox(flowbox, "prev")
         
@@ -227,7 +231,9 @@ class SearchableEmojiSelector(Gtk.Dialog):
                 target_children = child.get_children()
                 if target_children:
                     focus_idx = 0 if direction == "next" else -1
-                    target_children[focus_idx].grab_focus()
+                    button = target_children[focus_idx].get_child()
+                    if button:
+                        button.grab_focus()
                     break
 
     # --- Data Loading and Persistence ---

@@ -504,6 +504,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             value -= step
         elif event.direction == Gdk.ScrollDirection.DOWN:
             value += step
+        elif event.direction == Gdk.ScrollDirection.SMOOTH:
+            has_deltas, dx, dy = event.get_scroll_deltas()
+            if has_deltas:
+                value += dy * step
 
         # Ensure the value falls within the valid range
         adj.set_value(min(max(value, adj.get_lower()), adj.get_upper() - adj.get_page_size()))
@@ -656,7 +660,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             yield self.terminal
 
     def replace_child(self, old, new):
-        print("why would you call this on me?")
+        log.warning("replace_child called on TerminalBox, which has no children to replace")
         pass
 
     def unset_terminal(self, *args):
@@ -721,7 +725,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         return self.get_parent().get_notebook()
 
     def remove_dead_child(self, child):
-        print('Can\'t do, have no "child"')
+        log.warning("remove_dead_child called on TerminalBox, which has no child to remove")
 
     def on_terminal_focus(self, *args):
         self.get_root_box().set_last_terminal_focused(self.terminal)
@@ -782,13 +786,13 @@ class DualTerminalBox(Gtk.Paned, TerminalHolder):
         if isinstance(terminal_holder, TerminalHolder):
             self.add1(terminal_holder)
         else:
-            print("wtf, what have you added to me???")
+            log.error("DualTerminalBox.set_child_first: expected TerminalHolder, got %s", type(terminal_holder))
 
     def set_child_second(self, terminal_holder):
         if isinstance(terminal_holder, TerminalHolder):
             self.add2(terminal_holder)
         else:
-            print("wtf, what have you added to me???")
+            log.error("DualTerminalBox.set_child_second: expected TerminalHolder, got %s", type(terminal_holder))
 
     def get_terminals(self):
         return self.get_child1().get_terminals() + self.get_child2().get_terminals()
@@ -807,7 +811,7 @@ class DualTerminalBox(Gtk.Paned, TerminalHolder):
             self.remove(old)
             self.set_child_second(new)
         else:
-            print("I have never seen this widget!")
+            log.error("DualTerminalBox.replace_child: unknown child widget")
 
     def get_guake(self):
         return self.get_parent().get_guake()
@@ -846,7 +850,7 @@ class DualTerminalBox(Gtk.Paned, TerminalHolder):
             self.get_parent().replace_child(self, living_child)
             self.grab_box_terminal_focus(living_child)
         else:
-            print("I have never seen this widget!")
+            log.error("DualTerminalBox.remove_dead_child: unknown child widget")
 
 
 class TabLabelEventBox(Gtk.EventBox):

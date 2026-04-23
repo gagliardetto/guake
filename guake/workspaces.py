@@ -10,6 +10,7 @@ import os
 import shutil
 from datetime import datetime
 import subprocess
+import threading
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gio, Gdk, GLib
@@ -55,6 +56,7 @@ class WorkspaceManager:
         self.is_dropping = False
         self._git_status_cache = {}
         self._refresh_timer_id = None
+        self._is_refreshing_git = False
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
@@ -71,10 +73,6 @@ class WorkspaceManager:
         self._build_header()
         self._build_workspace_list()
         self._start_refresh_timer()
-
-    def get_xdg_config_directory(self):
-        xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "~/.config")
-        return Path(xdg_config_home, "guake").expanduser()
 
     def _load_data(self):
         """Loads workspace data from workspaces.json, without validation."""
@@ -543,7 +541,7 @@ class WorkspaceManager:
         if not active_ws or active_ws.get("is_special"):
             target_ws = next((w for w in self.get_all_workspaces() if not w.get("is_special")), None)
             if not target_ws:
-                target_ws = self.on_add_workspace(None, None, activate=True)
+                target_ws = self.on_add_workspace(None, activate=True)
             else:
                 self.workspaces_data["active_workspace"] = target_ws["id"]
             active_ws = target_ws
@@ -780,15 +778,87 @@ class WorkspaceManager:
 
     def _timed_refresh(self):
         """The callback for the GLib timer to periodically refresh data."""
+        if self._is_refreshing_git:
+            log.debug("Git status refresh already in progress, skipping.")
+            return True
+
         log.debug("Timed workspace git status refresh triggered.")
-        self._update_git_status_cache()
-        self._build_workspace_list()
+        self._is_refreshing_git = True
+
+        # Step 1 (main thread): Collect directory and workspace info from GTK objects.
+        # GTK widgets must only be accessed from the main thread.
+        terminal_dirs = {}  # {terminal_uuid_str: directory}
+        try:
+            for term in self.guake_app.notebook_manager.iter_terminals():
+                try:
+                    terminal_dirs[str(term.uuid)] = term.get_current_directory()
+                except Exception:
+                    continue
+        except Exception:
+            self._is_refreshing_git = False
+            return True
+
+        workspace_terminals = {}  # {ws_id: [term_uuid_str, ...]}
+        for ws in self.get_all_workspaces():
+            if not ws.get("is_special"):
+                workspace_terminals[ws['id']] = ws.get("terminals", [])
+
+        # Step 2 (background thread): Run all subprocess calls off the main thread.
+        def _do_git_checks():
+            unique_dirs = set(terminal_dirs.values())
+            dir_status_cache = {}
+            sorted_dirs = sorted(list(unique_dirs), key=len)
+
+            for directory in sorted_dirs:
+                parent = Path(directory).parent
+                while str(parent) != parent.root:
+                    if str(parent) in dir_status_cache and dir_status_cache[str(parent)] == 'dirty':
+                        dir_status_cache[directory] = 'dirty'
+                        break
+                    parent = parent.parent
+                else:
+                    dir_status_cache[directory] = self._get_git_status(directory)
+
+            # Determine status per workspace
+            new_cache = {}
+            for ws_id, term_uuids in workspace_terminals.items():
+                statuses = set()
+                for term_uuid_str in term_uuids:
+                    cwd = terminal_dirs.get(term_uuid_str)
+                    if cwd and cwd in dir_status_cache:
+                        statuses.add(dir_status_cache[cwd])
+                    else:
+                        statuses.add('no-git')
+
+                if 'dirty' in statuses:
+                    new_cache[ws_id] = 'dirty'
+                elif 'untracked' in statuses:
+                    new_cache[ws_id] = 'untracked'
+                elif 'clean' in statuses:
+                    new_cache[ws_id] = 'clean'
+                else:
+                    new_cache[ws_id] = 'no-git'
+
+            # Step 3 (main thread): Push results back and rebuild UI.
+            GLib.idle_add(self._apply_git_status_results, new_cache)
+
+        thread = threading.Thread(target=_do_git_checks, daemon=True)
+        thread.start()
         return True
 
+    def _apply_git_status_results(self, new_cache):
+        """Called on the main thread via GLib.idle_add to apply git status results."""
+        self._git_status_cache = new_cache
+        self._build_workspace_list()
+        self._is_refreshing_git = False
+        return False  # Run only once
+
     def _update_git_status_cache(self):
-        """Updates the internal cache of workspace git statuses using a more efficient directory-based approach."""
-        log.debug("Updating workspace git status cache.")
-        
+        """Synchronous fallback for updating git status cache (e.g. during init).
+        Prefer _timed_refresh for periodic updates to avoid blocking the UI.
+        """
+        log.debug("Updating workspace git status cache (synchronous).")
+
         all_terminals = list(self.guake_app.notebook_manager.iter_terminals())
         unique_dirs = set()
         for term in all_terminals:
@@ -798,25 +868,22 @@ class WorkspaceManager:
                 continue
 
         dir_status_cache = {}
-        # Sort directories by path length to process parents before children
         sorted_dirs = sorted(list(unique_dirs), key=len)
 
         for directory in sorted_dirs:
-            # Hierarchical check: if a parent is dirty, this one is too.
             parent = Path(directory).parent
             while str(parent) != parent.root:
                 if str(parent) in dir_status_cache and dir_status_cache[str(parent)] == 'dirty':
                     dir_status_cache[directory] = 'dirty'
                     break
                 parent = parent.parent
-            else: # No dirty parent found
+            else:
                 dir_status_cache[directory] = self._get_git_status(directory)
 
-        # Now, determine the status for each workspace
         for ws in self.get_all_workspaces():
             if ws.get("is_special"):
                 continue
-            
+
             statuses = set()
             for term_uuid_str in ws.get("terminals", []):
                 terminal = self.guake_app.notebook_manager.get_terminal_by_uuid(uuid.UUID(term_uuid_str))
@@ -827,7 +894,7 @@ class WorkspaceManager:
                             statuses.add(dir_status_cache[cwd])
                     except Exception:
                         statuses.add('no-git')
-            
+
             if 'dirty' in statuses:
                 self._git_status_cache[ws['id']] = 'dirty'
             elif 'untracked' in statuses:

@@ -70,7 +70,9 @@ def get_server_time(widget):
 # Decorator for save-tabs-when-changed
 def save_tabs_when_changed(func):
     """Decorator for save-tabs-when-changed"""
+    import functools
 
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # Find me the Guake!
         clsname = args[0].__class__.__name__
@@ -83,15 +85,19 @@ def save_tabs_when_changed(func):
             g = args[0].get_notebook().guake
         elif getattr(args[0], "guake", None):
             g = args[0].guake
+        elif getattr(args[0], "guake_app", None):
+            g = args[0].guake_app
         elif getattr(args[0], "notebook", None):
             g = args[0].notebook.guake
 
-        func(*args, **kwargs)
+        result = func(*args, **kwargs)
         log.debug("mom, I've been called: %s %s", func.__name__, func)
 
         # Tada!
         if g and g.settings.general.get_boolean("save-tabs-when-changed"):
             g.save_tabs()
+
+        return result
 
     return wrapper
 

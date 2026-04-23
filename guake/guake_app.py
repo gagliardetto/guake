@@ -233,11 +233,11 @@ class Guake(SimpleGladeApp):
         self.sidebar_hide_timer = None
 
         # Set sidebar width
-        sidebar_width_fraction = self.settings.general.get_int("sidebar-width-fraction")
+        sidebar_width_fraction = max(self.settings.general.get_int("sidebar-width-fraction"), 1)
         screen_width = self.window.get_screen().get_width()
         sidebar_child = self.sidebar_revealer.get_child()
         if sidebar_child:
-            sidebar_child.set_size_request(screen_width / sidebar_width_fraction, -1)
+            sidebar_child.set_size_request(int(screen_width / sidebar_width_fraction), -1)
 
         self.mainframe.remove(self.get_widget("notebook-teminals"))
 
@@ -371,7 +371,11 @@ class Guake(SimpleGladeApp):
             return
         log.info("Switching to page_num %s", page_num)
         current_notebook = self.notebook_manager.get_current_notebook()
-        terminal = current_notebook.get_terminals_for_page(page_num)[0] 
+        terminals = current_notebook.get_terminals_for_page(page_num)
+        if not terminals:
+            log.warning("No terminals found for page %s during tab switch.", page_num)
+            return
+        terminal = terminals[0]
         log.info("Current terminal UUID: %s (label: %s)", terminal.uuid, current_notebook.get_tab_text_page(page))
         if terminal and self.workspace_manager:
             self.workspace_manager.set_active_terminal_for_active_workspace(str(terminal.uuid))
@@ -1017,8 +1021,14 @@ class Guake(SimpleGladeApp):
     @save_tabs_when_changed
     def on_page_reorder(self, notebook, child, page_num):
         if self.workspace_manager:
-            visible_pages = [notebook.get_nth_page(i) for i in range(notebook.get_n_pages()) if notebook.get_nth_page(i).get_visible()]
-            new_uuid_order = [str(list(page.iter_terminals())[0].uuid) for page in visible_pages if list(page.iter_terminals())]
+            new_uuid_order = []
+            for i in range(notebook.get_n_pages()):
+                page = notebook.get_nth_page(i)
+                if not page.get_visible():
+                    continue
+                terms = list(page.iter_terminals())
+                if terms:
+                    new_uuid_order.append(str(terms[0].uuid))
             self.workspace_manager.update_terminal_order_for_active_workspace(new_uuid_order)
 
     def get_xdg_config_directory(self):
@@ -1149,7 +1159,11 @@ class Guake(SimpleGladeApp):
                 notebook.handler_block(self.page_reorder_handler_id)
 
             all_pages = [notebook.get_nth_page(i) for i in range(notebook.get_n_pages())]
-            page_map = {str(list(p.iter_terminals())[0].uuid): p for p in all_pages if list(p.iter_terminals())}
+            page_map = {}
+            for p in all_pages:
+                terms = list(p.iter_terminals())
+                if terms:
+                    page_map[str(terms[0].uuid)] = p
 
             # Hide all pages first to avoid visual glitches
             for page in all_pages:
@@ -1178,9 +1192,9 @@ class Guake(SimpleGladeApp):
                 log.info("Focusing page_to_focus %d for workspace %s", notebook.page_num(page_to_focus), workspace_id)
 
                 current_notebook = self.notebook_manager.get_current_notebook()
-                terminal = current_notebook.get_terminals_for_page(notebook.page_num(page_to_focus))[0] 
-                if terminal:
-                    terminal.grab_focus()
+                terminals = current_notebook.get_terminals_for_page(notebook.page_num(page_to_focus))
+                if terminals:
+                    terminals[0].grab_focus()
 
             # If the designated active terminal isn't in this workspace, or none was set, default to the first one.
             if not page_to_focus or page_to_focus not in pages_in_ws_ordered:

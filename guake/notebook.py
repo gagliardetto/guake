@@ -115,8 +115,13 @@ class TabLabelWithIndicator(TabLabelEventBox):
         self.color_load_state = 0.0
         self.psutil_proc = None
         
+        self.connect("destroy", self._on_destroy)
         self.show_all()
         self._update_widget_visibility()
+
+    def _on_destroy(self, widget):
+        """Stop all timers when the widget is destroyed to prevent stale callbacks."""
+        self._stop_timers()
 
     def set_process(self, pid):
         if pid:

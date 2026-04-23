@@ -5,6 +5,8 @@ import logging
 import shlex
 import subprocess
 
+log = logging.getLogger(__name__)
+
 gi.require_version("Gtk", "3.0")
 gi.require_version("GtkSource", "4")
 from gi.repository import GObject, Gtk, Gdk, GLib, Pango, GtkSource
@@ -517,9 +519,6 @@ class TextEditorDialog(Gtk.Dialog):
         one_third_height = screen_height // 3
         self.set_default_size(four_fifths_width, one_third_height)
 
-        # -- Logging Setup --
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-        
         # Main layout box
         main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.get_content_area().add(main_vbox)
@@ -599,7 +598,7 @@ class TextEditorDialog(Gtk.Dialog):
         scheme_manager = GtkSource.StyleSchemeManager.get_default()
         scheme = scheme_manager.get_scheme('oblivion')
         if not scheme:
-            logging.warning("Could not find 'oblivion' theme, falling back to 'classic'.")
+            log.warning("Could not find 'oblivion' theme, falling back to 'classic'.")
             scheme = scheme_manager.get_scheme('classic')
         if scheme:
             self.buffer.set_style_scheme(scheme)
@@ -752,9 +751,19 @@ class TextEditorDialog(Gtk.Dialog):
             self.buffer.end_user_action()
 
         except FileNotFoundError:
-            logging.error("The 'shfmt' command is not installed or not in your PATH.")
+            log.error("The 'shfmt' command is not installed or not in your PATH.")
+            self._update_info_bar(
+                message="Format failed: 'shfmt' is not installed.",
+                color="red",
+                msg_type=Gtk.MessageType.ERROR
+            )
         except subprocess.CalledProcessError as e:
-            logging.error(f"Error while formatting: {e.stderr}")
+            log.error("Error while formatting: %s", e.stderr)
+            self._update_info_bar(
+                message=f"Format error: {e.stderr.strip().splitlines()[-1] if e.stderr else 'Unknown error'}",
+                color="red",
+                msg_type=Gtk.MessageType.ERROR
+            )
 
     def validate_content(self, widget=None):
         """Validate shell script syntax using 'bash -n' and update UI accordingly."""

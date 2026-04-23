@@ -321,19 +321,27 @@ class QuickTabNavigationDialog(Gtk.Dialog):
             for term_uuid in ws.get("terminals", []):
                 term_to_ws[term_uuid] = ws
 
-        page_index = 0
         for notebook in self.notebook_manager.iter_notebooks():
-            for terminal in notebook.iter_terminals():
-                tab_label = notebook.get_tab_label(notebook.get_nth_page(page_index)).get_text()  
+            for page_index in range(notebook.get_n_pages()):
+                page = notebook.get_nth_page(page_index)
+                if not page:
+                    continue
+                tab_label_widget = notebook.get_tab_label(page)
+                tab_label = tab_label_widget.get_text() if tab_label_widget else "Terminal"
+
+                terminals = page.get_terminals()
+                if not terminals:
+                    continue
+                # Use the first terminal's info for the row
+                terminal = terminals[0]
                 tab_cwd = terminal.get_current_directory()
-                
+
                 ws = term_to_ws.get(str(terminal.uuid))
                 ws_name = ws['name'] if ws else "Unknown"
                 ws_id = ws['id'] if ws else None
 
                 row = MyListBoxRow(tab_label, tab_cwd, page_index, ws_id, ws_name)
                 self.list_box.add(row)
-                page_index += 1
 
     def on_entry_changed(self, widget):
         full_filter_text = widget.get_text().lower()
