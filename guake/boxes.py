@@ -972,6 +972,90 @@ class TabLabelEventBox(Gtk.EventBox):
 
         self.grab_focus_on_last_focused_terminal()
 
+    @save_tabs_when_changed
+    def on_set_opacity(self, user_data):
+        """Opens a dialog with a slider to set per-tab background opacity."""
+        HidePrevention(self.get_toplevel()).prevent()
+
+        page_num = self.notebook.find_tab_index_by_label(self)
+        page = self.notebook.get_nth_page(page_num) if page_num != -1 else None
+        terminals = list(page.iter_terminals()) if page else []
+
+        # Get the current opacity from the first terminal (or global default)
+        current_alpha = 1.0
+        if terminals:
+            t = terminals[0]
+            if t.custom_bgcolor:
+                current_alpha = t.custom_bgcolor.alpha
+            else:
+                current_alpha = self.notebook.guake.get_bgcolor().alpha
+
+        dialog = Gtk.Dialog(
+            title="Set Tab Opacity",
+            parent=self.notebook.guake.window,
+            flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+        )
+        dialog.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+        dialog.add_button(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        dialog.set_default_size(350, -1)
+
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_margin_start(15)
+        box.set_margin_end(15)
+        box.set_margin_top(10)
+        box.set_margin_bottom(5)
+
+        label = Gtk.Label(xalign=0)
+        label.set_markup("Background opacity for this tab:")
+        box.pack_start(label, False, False, 0)
+
+        adjustment = Gtk.Adjustment(
+            value=current_alpha * 100,
+            lower=0, upper=100,
+            step_increment=5, page_increment=10,
+        )
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adjustment)
+        scale.set_digits(0)
+        scale.set_value_pos(Gtk.PositionType.RIGHT)
+        scale.add_mark(0, Gtk.PositionType.BOTTOM, "0%")
+        scale.add_mark(50, Gtk.PositionType.BOTTOM, "50%")
+        scale.add_mark(100, Gtk.PositionType.BOTTOM, "100%")
+
+        # Live preview: update terminal opacity as the slider moves
+        def on_value_changed(scale):
+            alpha = scale.get_value() / 100.0
+            bg = self.notebook.guake.get_bgcolor()
+            bg.alpha = alpha
+            for t in terminals:
+                t.set_color_background_custom(bg)
+
+        scale.connect("value-changed", on_value_changed)
+        box.pack_start(scale, False, False, 0)
+
+        reset_btn = Gtk.Button.new_with_label("Reset to default")
+        def on_reset(btn):
+            default_alpha = self.notebook.guake.get_bgcolor().alpha
+            scale.set_value(default_alpha * 100)
+        reset_btn.connect("clicked", on_reset)
+        box.pack_start(reset_btn, False, False, 5)
+
+        dialog.show_all()
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            # Keep the custom opacity (already applied via live preview)
+            pass
+        else:
+            # Revert: reset custom bgcolor and re-apply from settings
+            for t in terminals:
+                t.custom_bgcolor = None
+            self.notebook.guake.set_colors_from_settings_on_page(page_num=page_num)
+
+        dialog.destroy()
+        HidePrevention(self.get_toplevel()).allow()
+        self.grab_focus_on_last_focused_terminal()
+
     def on_close(self, user_data):
         prompt_cfg = self.notebook.guake.settings.general.get_int("prompt-on-close-tab")
         self.notebook.delete_page_by_label(self, prompt=prompt_cfg)
