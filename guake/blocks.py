@@ -315,12 +315,11 @@ class BlockOverlay(Gtk.DrawingArea):
         self.set_hexpand(True)
         self.set_vexpand(True)
 
-        # We need pointer events for collapse toggle clicks, but pass
-        # everything else through to the terminal underneath
+        # Pure drawing layer — no input events, everything passes through
+        # to the terminal underneath via set_overlay_pass_through(True)
         self.set_can_focus(False)
-        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.set_sensitive(False)
         self.connect("draw", self._on_draw)
-        self.connect("button-press-event", self._on_click)
 
         # Redraw when terminal scrolls
         adj = self.terminal.get_vadjustment()
@@ -460,11 +459,6 @@ class BlockOverlay(Gtk.DrawingArea):
             cr.set_source_rgba(0.8, 0.15, 0.1, 0.06)
             cr.rectangle(0, y_start, width, y_end - y_start)
             cr.fill()
-
-    def _on_click(self, widget, event):
-        """Handle clicks on the overlay (for future collapse toggle)."""
-        # For now, pass all clicks through to the terminal
-        return False
 
     def refresh(self):
         """Schedule a redraw."""
