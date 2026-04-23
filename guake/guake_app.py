@@ -1240,22 +1240,17 @@ class Guake(SimpleGladeApp):
 
     def _restore_single_tab(self, nb_key, tab, background=False):
         """Restore a single tab from session data.
-        If background=True, don't focus or switch to the new page."""
+        If background=True, create silently — no show, no focus, no animation."""
         nb = self.notebook_manager.get_notebook(nb_key)
         if tab.get("panes"):
-            box, page_num, terminal = nb.new_page(empty=True)
+            box, page_num, terminal = nb.new_page(empty=True, quiet=background)
             nb.rename_page(page_num, tab.get("label", "Terminal"), tab.get("custom_label_set", False))
             box.restore_box_layout(box.child, tab["panes"])
         else:
-            box, page_num, terminal = nb.new_page(tab.get("directory"))
+            box, page_num, terminal = nb.new_page(tab.get("directory"), quiet=background)
             nb.rename_page(page_num, tab.get("label", "Terminal"), tab.get("custom_label_set", False))
 
-        if background:
-            # Hide the page immediately — switch_to_workspace will show it later
-            page = nb.get_nth_page(page_num)
-            if page:
-                page.hide()
-        else:
+        if not background:
             nb.set_current_page(page_num)
             if terminal:
                 terminal.grab_focus()

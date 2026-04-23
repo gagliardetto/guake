@@ -616,12 +616,12 @@ class TerminalNotebook(Gtk.Notebook):
     def delete_page_current(self, kill=True, prompt=0):
         self.delete_page(self.get_current_page(), kill, prompt)
 
-    def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None):
+    def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None, quiet=False):
         terminal_box = TerminalBox()
         if empty:
             terminal = None
         else:
-            terminal = self.terminal_spawn(directory, open_tab_cwd, terminal_uuid=terminal_uuid)
+            terminal = self.terminal_spawn(directory, open_tab_cwd, terminal_uuid=terminal_uuid, quiet=quiet)
             terminal_box.set_terminal(terminal)
         root_terminal_box = RootTerminalBox(self.guake, self)
         root_terminal_box.set_child(terminal_box)
@@ -629,25 +629,20 @@ class TerminalNotebook(Gtk.Notebook):
             root_terminal_box, None, position if position is not None else -1
         )
         self.set_tab_reorderable(root_terminal_box, True)
-        root_terminal_box.show_all()
-        # this is needed because self.window.show_all() results in showing every
-        # thing which includes the scrollbar too
-        self.guake.settings.general.triggerOnChangedValue(
-            self.guake.settings.general, "use-scrollbar"
-        )
-        # this is needed to initially set the last_terminal_focused,
-        # one could also call terminal.get_parent().on_terminal_focus()
-        if not empty:
-            self.terminal_attached(terminal)
-        self.hide_tabbar_if_one_tab()
+
+        if not quiet:
+            root_terminal_box.show_all()
+            self.guake.settings.general.triggerOnChangedValue(
+                self.guake.settings.general, "use-scrollbar"
+            )
+            if not empty:
+                self.terminal_attached(terminal)
+            self.hide_tabbar_if_one_tab()
+            self.update_all_tabs_activity()
 
         if self.guake:
-            # Attack background image draw callback to root terminal box
             root_terminal_box.connect_after("draw", self.guake.background_image_manager.draw)
-        
-        # After adding a new page, update all tab activities
-        self.update_all_tabs_activity()
-        
+
         return root_terminal_box, page_num, terminal
 
     def hide_tabbar_if_one_tab(self):
@@ -659,14 +654,15 @@ class TerminalNotebook(Gtk.Notebook):
             else:
                 self.set_property("show-tabs", True)
 
-    def terminal_spawn(self, directory=None, open_tab_cwd=False, terminal_uuid=None):
+    def terminal_spawn(self, directory=None, open_tab_cwd=False, terminal_uuid=None, quiet=False):
         terminal = GuakeTerminal(self.guake)
         if terminal_uuid:
             if isinstance(terminal_uuid, str):
                 terminal.uuid = uuid.UUID(terminal_uuid)
             else:
                 terminal.uuid = terminal_uuid
-        terminal.grab_focus()
+        if not quiet:
+            terminal.grab_focus()
         terminal.connect(
             "key-press-event",
             lambda x, y: self.guake.accel_group.activate(x, y) if self.guake.accel_group else False,
