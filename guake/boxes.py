@@ -894,13 +894,16 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         return dual_terminal_box
 
     def get_guake(self):
-        return self.get_parent().get_guake()
+        ancestor = _find_ancestor(self, 'get_guake')
+        return ancestor.get_guake() if ancestor else None
 
     def get_window(self):
-        return self.get_parent().get_window()
+        ancestor = _find_ancestor(self, 'get_window')
+        return ancestor.get_window() if ancestor else None
 
     def get_settings(self):
-        return self.get_parent().get_settings()
+        ancestor = _find_ancestor(self, 'get_settings')
+        return ancestor.get_settings() if ancestor else None
 
     def get_root_box(self):
         ancestor = _find_ancestor(self, 'get_root_box')
