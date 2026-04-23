@@ -61,6 +61,18 @@ class TerminalHolder:
     def remove_dead_child(self, child):
         raise NotImplementedError
 
+
+def _find_ancestor(widget, method_name):
+    """Walk up the widget tree to find the nearest ancestor that has the given method.
+    Handles intermediate container widgets (like Gtk.Overlay) that don't implement
+    TerminalHolder methods."""
+    parent = widget.get_parent()
+    while parent is not None:
+        if hasattr(parent, method_name):
+            return parent
+        parent = parent.get_parent()
+    return None
+
 import cairo
 import random
 import string
@@ -844,21 +856,25 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         return self.get_parent().get_settings()
 
     def get_root_box(self):
-        return self.get_parent().get_root_box()
+        ancestor = _find_ancestor(self, 'get_root_box')
+        return ancestor.get_root_box() if ancestor else None
 
     def get_notebook(self):
-        return self.get_parent().get_notebook()
+        ancestor = _find_ancestor(self, 'get_notebook')
+        return ancestor.get_notebook() if ancestor else None
 
     def remove_dead_child(self, child):
         log.warning("remove_dead_child called on TerminalBox, which has no child to remove")
 
     def on_terminal_focus(self, *args):
-        self.get_root_box().set_last_terminal_focused(self.terminal)
+        root = self.get_root_box()
+        if root:
+            root.set_last_terminal_focused(self.terminal)
 
     def on_terminal_exited(self, terminal, status):
-        if not self.get_parent():
-            return
-        self.get_parent().remove_dead_child(self)
+        ancestor = _find_ancestor(self, 'remove_dead_child')
+        if ancestor:
+            ancestor.remove_dead_child(self)
 
     def on_button_press(self, target, event, user_data):
         if event.button == 3:
@@ -939,19 +955,24 @@ class DualTerminalBox(Gtk.Paned, TerminalHolder):
             log.error("DualTerminalBox.replace_child: unknown child widget")
 
     def get_guake(self):
-        return self.get_parent().get_guake()
+        ancestor = _find_ancestor(self, 'get_guake')
+        return ancestor.get_guake() if ancestor else None
 
     def get_window(self):
-        return self.get_parent().get_window()
+        ancestor = _find_ancestor(self, 'get_window')
+        return ancestor.get_window() if ancestor else None
 
     def get_settings(self):
-        return self.get_parent().get_settings()
+        ancestor = _find_ancestor(self, 'get_settings')
+        return ancestor.get_settings() if ancestor else None
 
     def get_root_box(self):
-        return self.get_parent().get_root_box()
+        ancestor = _find_ancestor(self, 'get_root_box')
+        return ancestor.get_root_box() if ancestor else None
 
     def get_notebook(self):
-        return self.get_parent().get_notebook()
+        ancestor = _find_ancestor(self, 'get_notebook')
+        return ancestor.get_notebook() if ancestor else None
 
     def grab_box_terminal_focus(self, box):
         if isinstance(box, DualTerminalBox):
