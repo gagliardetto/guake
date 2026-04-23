@@ -337,63 +337,49 @@ class MultiCursorUndoAction(UndoAction):
         self.dialog = dialog
         self.actions = []
 
-        # Save pre-action state (offsets)
+        # Save pre-action state as plain offset pairs (not Cursor references)
         insert_mark = self.dialog.doc.get_mark("insert")
         selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
         self.primary_before = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
                                selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
-        # Use a dictionary to map cursor objects to their state for robustness
-        self.secondary_before = {c: (c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors}
+        self.secondary_before = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
 
     def add(self, action):
         self.actions.append(action)
 
     def save_post_state(self):
-        # Save post-action state (offsets)
         insert_mark = self.dialog.doc.get_mark("insert")
         selection_bound_mark = self.dialog.doc.get_mark("selection_bound")
         self.primary_after = (insert_mark.get_buffer().get_iter_at_mark(insert_mark).get_offset(),
                               selection_bound_mark.get_buffer().get_iter_at_mark(selection_bound_mark).get_offset())
-        # Use a dictionary to map cursor objects to their state for robustness
-        self.secondary_after = {c: (c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors}
+        self.secondary_after = [(c.tag.get_start_iter().get_offset(), c.tag.get_end_iter().get_offset()) for c in self.dialog.cursors]
+
+    def _restore_cursors(self, primary, secondary_offsets):
+        """Restore primary cursor and recreate secondary cursors from saved offsets."""
+        # Restore primary
+        primary_insert_iter = self.dialog.doc.get_iter_at_offset(primary[0])
+        primary_select_iter = self.dialog.doc.get_iter_at_offset(primary[1])
+        self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
+        self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
+
+        # Clear existing cursors and recreate from saved offsets
+        self.dialog.clear_cursors()
+        for start_offset, end_offset in secondary_offsets:
+            start_iter = self.dialog.doc.get_iter_at_offset(start_offset)
+            end_iter = self.dialog.doc.get_iter_at_offset(end_offset)
+            self.dialog.add_cursor(start_iter, end_iter)
+
+        self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
 
     def undo(self):
         for action in reversed(self.actions):
             action.undo()
-        
-        # Restore cursors from saved offsets
-        primary_insert_iter = self.dialog.doc.get_iter_at_offset(self.primary_before[0])
-        primary_select_iter = self.dialog.doc.get_iter_at_offset(self.primary_before[1])
-        self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
-        self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
-
-        # Restore secondary cursors from the dictionary
-        for cursor, (start_offset, end_offset) in self.secondary_before.items():
-            if cursor in self.dialog.cursors: # Check if cursor still exists
-                start_iter = self.dialog.doc.get_iter_at_offset(start_offset)
-                end_iter = self.dialog.doc.get_iter_at_offset(end_offset)
-                cursor.tag.move_marks(start_iter, end_iter)
-        
-        self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
+        self._restore_cursors(self.primary_before, self.secondary_before)
 
     def redo(self):
         for action in self.actions:
             action.redo()
-        
-        # Restore cursors from saved offsets
-        primary_insert_iter = self.dialog.doc.get_iter_at_offset(self.primary_after[0])
-        primary_select_iter = self.dialog.doc.get_iter_at_offset(self.primary_after[1])
-        self.dialog.doc.move_mark_by_name("insert", primary_insert_iter)
-        self.dialog.doc.move_mark_by_name("selection_bound", primary_select_iter)
-
-        # Restore secondary cursors from the dictionary
-        for cursor, (start_offset, end_offset) in self.secondary_after.items():
-            if cursor in self.dialog.cursors: # Check if cursor still exists
-                start_iter = self.dialog.doc.get_iter_at_offset(start_offset)
-                end_iter = self.dialog.doc.get_iter_at_offset(end_offset)
-                cursor.tag.move_marks(start_iter, end_iter)
-            
-        self.dialog.view.scroll_to_mark(self.dialog.doc.get_mark("insert"), 0.0, True, 0.5, 0.5)
+        self._restore_cursors(self.primary_after, self.secondary_after)
 
 
 # ############################################################################
@@ -605,7 +591,11 @@ class TextEditorDialog(Gtk.Dialog):
 
         self.doc = self.buffer
         scrolled_window.add(self.view)
-        
+
+        # Disable GtkSourceBuffer's built-in undo — we use our own UndoManager
+        # that properly tracks multi-cursor state
+        self.buffer.set_max_undo_levels(0)
+
         # -- AI Chat Window --
         self.ai_chat_window = None
 
@@ -732,6 +722,7 @@ class TextEditorDialog(Gtk.Dialog):
 
     def format_content(self, widget=None):
         """Formats the entire buffer content using an external tool (shfmt)."""
+        self.clear_cursors()  # Prevent stale cursor marks after buffer replacement
         try:
             original_content = self.get_raw_content()
             # Use shfmt to format the code. The '-i 2' flag sets indentation to 2 spaces.
@@ -970,11 +961,11 @@ class TextEditorDialog(Gtk.Dialog):
         line = start_line + line_delta
         start_iter = sel_start.copy()
         start_iter.set_line(line)
-        start_iter.set_line_offset(min(sel_start.get_line_offset(), start_iter.get_chars_in_line()))
+        start_iter.set_line_offset(min(sel_start.get_line_offset(), max(start_iter.get_chars_in_line() - 1, 0)))
         
         end_iter = sel_end.copy()
         end_iter.set_line(line + (sel_end.get_line() - sel_start.get_line()))
-        end_iter.set_line_offset(min(sel_end.get_line_offset(), end_iter.get_chars_in_line()))
+        end_iter.set_line_offset(min(sel_end.get_line_offset(), max(end_iter.get_chars_in_line() - 1, 0)))
         
         if start_iter.get_line() != start_line:
             self.add_cursor(start_iter, end_iter)

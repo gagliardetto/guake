@@ -630,7 +630,6 @@ class GuakeTerminal(Vte.Terminal):
 
     def set_color_foreground_custom(self, fgcolor, *args, **kwargs):
         """Sets custom foreground color for this terminal"""
-        print(f"set_color_foreground_custom: {self.uuid}")
         self.custom_fgcolor = fgcolor
         super().set_color_foreground(self.custom_fgcolor, *args, **kwargs)
 
