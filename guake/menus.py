@@ -1,13 +1,87 @@
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 
 from guake.customcommands import CustomCommands
 
 import logging
 
 log = logging.getLogger(__name__)
+
+
+def _add_block_menu_items(menu, terminal, block):
+    """Add command-block-specific items to the context menu."""
+    cmd = block.command or ""
+    cmd_display = cmd if len(cmd) <= 40 else cmd[:37] + "..."
+
+    # Header showing which command
+    header = Gtk.MenuItem(label=f"⌘  {cmd_display}")
+    header.set_sensitive(False)
+    menu.add(header)
+
+    # Copy command
+    mi = Gtk.MenuItem(label=_("Copy Command"))
+    mi.connect("activate", lambda *a: _copy_to_clipboard(terminal, cmd))
+    menu.add(mi)
+
+    # Re-run command
+    mi = Gtk.MenuItem(label=_("Re-run Command"))
+    mi.connect("activate", lambda *a: terminal.feed_child(cmd + "\n"))
+    menu.add(mi)
+
+    # Copy output
+    if block.command_row is not None and block.end_row is not None:
+        output_lines = block.end_row - block.command_row - 1
+        if output_lines > 0:
+            mi = Gtk.MenuItem(label=_("Copy Output (%d lines)") % output_lines)
+            mi.connect("activate", lambda *a: _copy_block_output(terminal, block))
+            menu.add(mi)
+
+    # Show exit code and duration
+    info_parts = []
+    if block.exit_code is not None:
+        info_parts.append(f"exit {block.exit_code}")
+    dur = block.format_duration()
+    if dur:
+        info_parts.append(dur)
+    if info_parts:
+        mi = Gtk.MenuItem(label="    ".join(info_parts))
+        mi.set_sensitive(False)
+        menu.add(mi)
+
+
+def _copy_to_clipboard(terminal, text):
+    """Copy text to the system clipboard."""
+    display = terminal.get_display()
+    clipboard = Gtk.Clipboard.get_default(display)
+    clipboard.set_text(text, -1)
+    clipboard.store()
+
+
+def _copy_block_output(terminal, block):
+    """Extract and copy the output of a command block."""
+    import gi
+    gi.require_version("Vte", "2.91")
+    from gi.repository import Gio, Vte
+
+    try:
+        output_stream = Gio.MemoryOutputStream.new_resizable()
+        terminal.write_contents_sync(output_stream, Vte.WriteFlags.DEFAULT, None)
+        output_stream.close()
+        content = output_stream.steal_as_bytes().get_data().decode('utf-8', errors='replace')
+        lines = content.split('\n')
+
+        # Extract lines between command_row and end_row
+        adj = terminal.get_vadjustment()
+        scrollback_offset = 0  # write_contents_sync includes all scrollback
+        start = block.command_row + 1 - scrollback_offset
+        end = block.end_row - scrollback_offset
+        if 0 <= start < len(lines) and end <= len(lines):
+            output = '\n'.join(lines[start:end]).rstrip()
+            _copy_to_clipboard(terminal, output)
+    except Exception as e:
+        log.debug("Failed to copy block output: %s", e)
 
 
 def mk_tab_context_menu(callback_object):
@@ -90,12 +164,17 @@ SEARCH_SELECTION_LENGTH = 20
 FILE_SELECTION_LENGTH = 30
 
 
-def mk_terminal_context_menu(terminal, window, settings, callback_object):
+def mk_terminal_context_menu(terminal, window, settings, callback_object, clicked_block=None):
     """Create the context menu for a terminal."""
     # Store the menu in a temp variable in terminal so that popup() is happy. See:
     #   https://stackoverflow.com/questions/28465956/
     terminal.context_menu = Gtk.Menu()
     menu = terminal.context_menu
+
+    # Block-specific items (if right-clicked inside a command block)
+    if clicked_block and clicked_block.is_complete:
+        _add_block_menu_items(menu, terminal, clicked_block)
+        menu.add(Gtk.SeparatorMenuItem())
     
     customcommands = CustomCommands(settings, callback_object)
     if customcommands.should_load():

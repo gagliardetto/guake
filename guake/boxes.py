@@ -973,6 +973,18 @@ class TerminalBox(Gtk.Box, TerminalHolderChild, TerminalHolder):
             ):
                 return True
 
+            # Detect which command block was right-clicked (if any)
+            clicked_block = None
+            root = self.get_root_box()
+            if root and root.block_model:
+                adj = self.terminal.get_vadjustment()
+                alloc = self.terminal.get_allocation()
+                rows = self.terminal.get_row_count()
+                if rows > 0 and alloc.height > 0:
+                    char_h = alloc.height / rows
+                    absolute_row = int(adj.get_value() + event.y / char_h)
+                    clicked_block = root.block_model.get_block_at_row(absolute_row)
+
             menu = mk_terminal_context_menu(
                 self.terminal,
                 self.get_window(),
@@ -983,6 +995,7 @@ class TerminalBox(Gtk.Box, TerminalHolderChild, TerminalHolder):
                     self.get_settings(),
                     self.get_root_box().get_notebook(),
                 ),
+                clicked_block=clicked_block,
             )
             menu.connect("hide", MenuHideCallback(self.get_window()).on_hide)
             HidePrevention(self.get_window()).prevent()
