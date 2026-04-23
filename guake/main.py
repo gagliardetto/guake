@@ -73,25 +73,6 @@ def main():
     running it will be used and a True value will be returned,
     otherwise, false will be returned.
     """
-    # === Startup diagnostics — shows which files are loaded ===
-    import guake as _guake_pkg
-    import guake.menus as _menus_mod
-    import guake.boxes as _boxes_mod
-    _diag_lines = [
-        f"  guake package: {_guake_pkg.__path__[0]}",
-        f"  menus.py: {_menus_mod.__file__}",
-        f"  boxes.py: {_boxes_mod.__file__}",
-        f"  has blocks.py: {os.path.exists(os.path.join(_guake_pkg.__path__[0], 'blocks.py'))}",
-        f"  has inline_editor.py: {os.path.exists(os.path.join(_guake_pkg.__path__[0], 'inline_editor.py'))}",
-        f"  has Set Opacity in menus: {'on_set_opacity' in open(_menus_mod.__file__).read()}",
-    ]
-    print("=" * 60)
-    print("GUAKE STARTUP DIAGNOSTICS")
-    for line in _diag_lines:
-        print(line)
-    print("=" * 60)
-    # =============================================================
-
     # Force to xterm-256 colors for compatibility with some old command line programs
     os.environ["TERM"] = "xterm-256color"
     os.environ["TERM_PROGRAM"] = "guake"
