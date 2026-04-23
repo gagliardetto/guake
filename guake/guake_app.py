@@ -1216,8 +1216,6 @@ class Guake(SimpleGladeApp):
 
         # 5. Mark non-active workspaces as loading and queue background restore
         if other_tabs:
-            self._pending_restore_tabs = other_tabs
-            self._pending_restore_index = 0
             self._pending_session_uuids = all_session_uuids
 
             # Mark loading workspaces in sidebar
@@ -1228,11 +1226,14 @@ class Guake(SimpleGladeApp):
             if hasattr(self.workspace_manager, 'set_loading_workspaces'):
                 self.workspace_manager.set_loading_workspaces(loading_ws_ids)
 
-            # Start background restore — one tab per idle cycle
-            GLib.idle_add(self._restore_next_background_tab)
+            # Restore all background tabs in one batch via idle_add
+            # to avoid per-tab window resize/animation
+            GLib.idle_add(self._restore_all_background_tabs, other_tabs)
         else:
             # All tabs restored, reconcile
             if self.workspace_manager:
+                all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+                self.workspace_manager.validate_loaded_workspaces(all_uuids)
                 self.workspace_manager.reconcile_orphan_tabs(all_session_uuids)
 
         if self.settings.general.get_boolean("restore-tabs-notify") and not suppress_notify:
@@ -1257,38 +1258,39 @@ class Guake(SimpleGladeApp):
 
         return box, page_num, terminal
 
-    def _restore_next_background_tab(self):
-        """Restore one tab in the background per idle cycle."""
-        if self._pending_restore_index >= len(self._pending_restore_tabs):
-            # All done — validate workspaces, reconcile, clear loading indicators
-            if self.workspace_manager:
-                all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
-                self.workspace_manager.validate_loaded_workspaces(all_uuids)
-                self.workspace_manager.reconcile_orphan_tabs(self._pending_session_uuids)
-                if hasattr(self.workspace_manager, 'set_loading_workspaces'):
-                    self.workspace_manager.set_loading_workspaces(set())
-            self._pending_restore_tabs = None
-            self._pending_session_uuids = None
-            log.info("Background tab restore complete")
-            return False  # Stop idle callback
-
-        nb_key, tab = self._pending_restore_tabs[self._pending_restore_index]
-        self._pending_restore_index += 1
+    def _restore_all_background_tabs(self, tabs):
+        """Restore all background tabs in one batch with the notebook frozen
+        to prevent per-tab window resize/animation."""
+        notebook = self.get_notebook()
+        was_restoring = self.is_restoring_session
+        self.is_restoring_session = True
 
         try:
-            was_restoring = self.is_restoring_session
-            self.is_restoring_session = True
-            self._restore_single_tab(nb_key, tab, background=True)
+            # Freeze to prevent resize events propagating per-tab
+            notebook.freeze_child_notify()
+
+            for nb_key, tab in tabs:
+                try:
+                    self._restore_single_tab(nb_key, tab, background=True)
+                except Exception as e:
+                    log.warning("Failed to restore background tab: %s", e)
+
+            notebook.thaw_child_notify()
+        finally:
             self.is_restoring_session = was_restoring
-        except Exception as e:
-            log.warning("Failed to restore background tab: %s", e)
 
-        # Update loading state: check which workspaces are now fully loaded
-        if hasattr(self.workspace_manager, 'update_loading_progress'):
-            self.workspace_manager.update_loading_progress(
-                self._pending_restore_index, len(self._pending_restore_tabs))
+        # All done — validate, reconcile, clear loading indicators
+        if self.workspace_manager:
+            all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+            self.workspace_manager.validate_loaded_workspaces(all_uuids)
+            self.workspace_manager.reconcile_orphan_tabs(self._pending_session_uuids)
+            if hasattr(self.workspace_manager, 'set_loading_workspaces'):
+                self.workspace_manager.set_loading_workspaces(set())
 
-        return True  # Continue idle callback
+        self._pending_restore_tabs = None
+        self._pending_session_uuids = None
+        log.info("Background tab restore complete (%d tabs)", len(tabs))
+        return False  # one-shot idle
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)
