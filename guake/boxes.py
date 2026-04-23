@@ -348,14 +348,11 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
         if event_type == "prompt_start":
+            # prompt_start is a reliable signal: the shell's precmd hook
+            # fired, meaning we're back at a normal prompt. No need for
+            # alt-screen heuristics — if we got this event, the shell is ready.
             if self.inline_editor:
-                # Check for alternate screen (full-screen apps)
-                # VTE doesn't expose this directly in all versions, so we use
-                # a heuristic: if scrollback is 0, we're likely in alt screen
-                adj = self.last_terminal_focused.get_vadjustment() if self.last_terminal_focused else None
-                in_alt_screen = adj and adj.get_upper() <= adj.get_page_size() + 1
-                if not in_alt_screen:
-                    self.inline_editor.activate()
+                self.inline_editor.activate()
             if self.block_overlay:
                 self.block_overlay.refresh()
 

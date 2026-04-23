@@ -20,6 +20,8 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("GtkSource", "4")
 from gi.repository import Gtk, Gdk, GLib, Pango, GtkSource
 
+from guake.editor import Cursor, MarkTag, Casing
+
 log = logging.getLogger(__name__)
 
 # Maximum visible lines before the editor starts scrolling
@@ -108,7 +110,19 @@ class InlineEditor(Gtk.Revealer):
 
         # -- Signals --
         self.view.connect("key-press-event", self._on_key_press)
+        self.view.connect("button-press-event", self._on_button_press)
         self.buffer.connect("changed", self._on_buffer_changed)
+
+        # -- Multi-cursor state --
+        self.cursors = []
+        self.matches = []
+        self.clipboard = ''
+        self._handled_paste = False
+        self._mc_handlers = []
+        self._in_user_action = False
+        self._is_modifying = False
+        self._user_actions = []
+        self.doc = self.buffer
 
         # -- CSS --
         css = Gtk.CssProvider()
@@ -140,9 +154,9 @@ class InlineEditor(Gtk.Revealer):
         if self._active:
             return
         self._active = True
+        self.clear_cursors()
         self.buffer.set_text("")
         self.set_reveal_child(True)
-        # Delay focus grab slightly to avoid event ordering issues
         GLib.idle_add(self._grab_focus)
 
     def deactivate(self):
@@ -150,6 +164,7 @@ class InlineEditor(Gtk.Revealer):
         if not self._active:
             return
         self._active = False
+        self.clear_cursors()
         self.set_reveal_child(False)
 
     def _grab_focus(self):
@@ -237,17 +252,45 @@ class InlineEditor(Gtk.Revealer):
             self._request_completion()
             return True
 
-        # Ctrl+D on empty editor → send EOF
-        if keyval == Gdk.KEY_d and (state & Gdk.ModifierType.CONTROL_MASK):
+        # Ctrl+D → match selection and add cursor (EOF only on empty editor without selection)
+        if keyval == Gdk.KEY_d and state == Gdk.ModifierType.CONTROL_MASK:
             text = self.buffer.get_text(self.buffer.get_start_iter(), self.buffer.get_end_iter(), False)
             if not text:
                 self.terminal.feed_child("\x04")
                 self.deactivate()
                 return True
+            if self.buffer.get_has_selection():
+                self.match_cursor()
+                return True
             return False
 
-        # Escape → clear editor, return focus to terminal
+        # Ctrl+Shift+D → fuzzy match cursor
+        if keyval == Gdk.KEY_D and state == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            if self.buffer.get_has_selection():
+                self.match_cursor(fuzzy=True)
+                return True
+            return False
+
+        # Ctrl+U → unmatch last cursor
+        if keyval == Gdk.KEY_u and state == Gdk.ModifierType.CONTROL_MASK:
+            if self.cursors:
+                self.unmatch_cursor()
+                return True
+            return False
+
+        # Ctrl+Shift+Up/Down → column select
+        if keyval == Gdk.KEY_Up and state == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            self.column_select(-1)
+            return True
+        if keyval == Gdk.KEY_Down and state == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
+            self.column_select(1)
+            return True
+
+        # Escape → clear cursors first, then clear editor
         if keyval == Gdk.KEY_Escape:
+            if self.cursors:
+                self.clear_cursors()
+                return True
             self.buffer.set_text("")
             self.deactivate()
             self.terminal.grab_focus()
@@ -344,3 +387,228 @@ class InlineEditor(Gtk.Revealer):
             self.buffer.get_end_iter(),
             False,
         )
+
+    # ---- Ctrl+Click ----
+
+    def _on_button_press(self, view, event):
+        if event.type == Gdk.EventType.BUTTON_PRESS:
+            state = event.state & Gtk.accelerator_get_default_mod_mask()
+            if state & Gdk.ModifierType.CONTROL_MASK:
+                x, y = self.view.window_to_buffer_coords(
+                    Gtk.TextWindowType.TEXT, int(event.x), int(event.y))
+                found, pos = self.view.get_iter_at_location(x, y)
+                if found:
+                    self.add_cursor(pos, pos)
+                return True
+            else:
+                self.clear_cursors()
+        return False
+
+    # ---- Multi-cursor infrastructure ----
+
+    def order_iters(self, iters):
+        if iters is None or iters[0] is None or iters[1] is None:
+            return (None, None)
+        return (iters[1], iters[0]) if iters[0].get_offset() > iters[1].get_offset() else iters
+
+    def get_selection_iters(self):
+        insert_iter = self.doc.get_iter_at_mark(self.doc.get_mark("insert"))
+        sel_iter = self.doc.get_iter_at_mark(self.doc.get_mark("selection_bound"))
+        return (insert_iter, sel_iter)
+
+    def add_cursor(self, start_iter, end_iter):
+        if not self.cursors:
+            self._hook_mc_handlers()
+        self.cursors.append(Cursor(self.view, start_iter, end_iter))
+
+    def remove_cursor(self, index):
+        if self.cursors:
+            self.cursors[index].remove()
+            del self.cursors[index]
+            if not self.cursors:
+                self._unhook_mc_handlers()
+
+    def clear_cursors(self):
+        while self.cursors:
+            self.remove_cursor(-1)
+        self.clear_matches()
+
+    def clear_matches(self):
+        for m in self.matches:
+            m.remove()
+        self.matches = []
+
+    # ---- Match cursor (Ctrl+D) ----
+
+    def match_cursor(self, fuzzy=False):
+        sel_start, sel_end = self.order_iters(self.get_selection_iters())
+        if not sel_start:
+            return
+        text = self.doc.get_text(sel_start, sel_end, True)
+        if not text:
+            return
+
+        if self.cursors:
+            search_start = self.cursors[-1].tag.get_end_iter()
+        else:
+            self.tag_all_matches(text, fuzzy)
+            search_start = sel_end
+
+        search_end = sel_start if search_start.get_offset() < sel_start.get_offset() else None
+        match = self._find_next(text, search_start, search_end, fuzzy)
+
+        if match is None and search_start.get_offset() >= sel_end.get_offset():
+            match = self._find_next(text, self.doc.get_start_iter(), sel_start, fuzzy)
+
+        if match:
+            self.add_cursor(match[0], match[1])
+            self.cursors[-1].scroll_onscreen()
+
+    def tag_all_matches(self, text, fuzzy):
+        sel_start, sel_end = self.order_iters(self.get_selection_iters())
+        if not sel_start:
+            return
+        start_iter = self.doc.get_start_iter()
+        while True:
+            match = self._find_next(text, start_iter, None, fuzzy)
+            if not match:
+                break
+            start_iter = match[1]
+            if match[0].get_offset() == sel_start.get_offset():
+                continue
+            self.matches.append(MarkTag(self.view, 'multicursor_match', match[0], match[1]))
+
+    def _find_next(self, text, search_start, search_end, fuzzy):
+        if fuzzy:
+            flags = Gtk.TextSearchFlags.CASE_INSENSITIVE
+            casing = Casing().detect(text)
+            words = casing.split(text)
+            alternatives = {text, Casing('lower', '_').join(words),
+                            Casing('lower', '-').join(words),
+                            Casing('lower', '').join(words)}
+            earliest = None
+            for alt in alternatives:
+                if not alt:
+                    continue
+                match = search_start.forward_search(alt, flags, search_end)
+                if match and (earliest is None or match[0].get_offset() < earliest[0].get_offset()):
+                    earliest = match
+            return earliest
+        else:
+            return search_start.forward_search(text, 0, search_end)
+
+    def unmatch_cursor(self):
+        self.remove_cursor(-1)
+        if self.cursors:
+            self.cursors[-1].scroll_onscreen()
+
+    # ---- Column select (Ctrl+Shift+Up/Down) ----
+
+    def column_select(self, line_delta):
+        sel_start, sel_end = self.order_iters(self.get_selection_iters())
+        if not sel_start:
+            return
+
+        sel_line = sel_start.get_line()
+        min_line = max_line = sel_line
+        for cursor in self.cursors:
+            line = cursor.tag.get_start_iter().get_line()
+            min_line, max_line = min(line, min_line), max(line, max_line)
+
+        start_line = None
+        if line_delta < 0 and max_line == sel_line:
+            start_line = min_line
+        elif line_delta > 0 and min_line == sel_line:
+            start_line = max_line
+
+        if start_line is None:
+            self.unmatch_cursor()
+            return
+
+        line = start_line + line_delta
+        start_iter = sel_start.copy()
+        start_iter.set_line(line)
+        start_iter.set_line_offset(min(sel_start.get_line_offset(),
+                                       max(start_iter.get_chars_in_line() - 1, 0)))
+        end_iter = sel_end.copy()
+        end_iter.set_line(line + (sel_end.get_line() - sel_start.get_line()))
+        end_iter.set_line_offset(min(sel_end.get_line_offset(),
+                                     max(end_iter.get_chars_in_line() - 1, 0)))
+
+        if start_iter.get_line() != start_line:
+            self.add_cursor(start_iter, end_iter)
+            self.cursors[-1].scroll_onscreen()
+
+    # ---- Multi-cursor document signal handlers ----
+
+    def _hook_mc_handlers(self):
+        h = []
+        h.append((self.doc, self.doc.connect('insert-text', self._mc_on_insert)))
+        h.append((self.doc, self.doc.connect('delete-range', self._mc_on_delete)))
+        h.append((self.doc, self.doc.connect('begin-user-action', self._mc_begin)))
+        h.append((self.doc, self.doc.connect('end-user-action', self._mc_end)))
+        h.append((self.view, self.view.connect('move-cursor', self._mc_move)))
+        self._mc_handlers = h
+
+    def _unhook_mc_handlers(self):
+        for obj, hid in self._mc_handlers:
+            if obj.handler_is_connected(hid):
+                obj.disconnect(hid)
+        self._mc_handlers = []
+
+    def _mc_begin(self, doc=None):
+        self._user_actions = []
+        self._in_user_action = True
+
+    def _mc_on_insert(self, doc, start, text, length):
+        if self._in_user_action and not self._is_modifying:
+            sel_start, sel_end = self.order_iters(self.get_selection_iters())
+            if not sel_start:
+                return
+            delta = start.get_offset() - sel_start.get_offset()
+            self._user_actions.append(('insert', delta, text))
+
+    def _mc_on_delete(self, doc, start, end):
+        if self._in_user_action and not self._is_modifying:
+            start, end = self.order_iters((start, end))
+            if not start:
+                return
+            sel_start, sel_end = self.order_iters(self.get_selection_iters())
+            if not sel_start:
+                return
+            sd = start.get_offset() - sel_start.get_offset()
+            ed = end.get_offset() - sel_end.get_offset()
+            self._user_actions.append(('delete', sd, ed))
+
+    def _mc_end(self, doc=None):
+        if not self._in_user_action:
+            return
+        self._in_user_action = False
+        actions = self._user_actions[:]
+        self._user_actions = []
+        if not actions:
+            return
+
+        self.clear_matches()
+        self._is_modifying = True
+        sorted_cursors = sorted(self.cursors,
+                                key=lambda c: c.tag.get_start_iter().get_offset(),
+                                reverse=True)
+        for action_type, *args in actions:
+            if action_type == 'insert':
+                delta, text = args
+                for cursor in sorted_cursors:
+                    cursor.insert(delta, text)
+            elif action_type == 'delete':
+                sd, ed = args
+                for cursor in sorted_cursors:
+                    cursor.delete(sd, ed)
+        self._is_modifying = False
+
+    def _mc_move(self, view, step_size, count, extend_selection):
+        self.clear_matches()
+        if step_size in (Gtk.MovementStep.BUFFER_ENDS, Gtk.MovementStep.PAGES):
+            self.clear_cursors()
+            return
+        for cursor in self.cursors:
+            cursor.move(step_size, count, extend_selection)
