@@ -55,20 +55,22 @@ class InlineEditor(Gtk.Revealer):
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self.set_transition_duration(150)
 
-        # -- Container --
-        frame = Gtk.Frame()
-        frame.get_style_context().add_class("inline-editor-frame")
-        self.add(frame)
+        # -- Outer container --
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.get_style_context().add_class("inline-editor-outer")
+        self.add(outer)
 
-        container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        frame.add(container)
+        # -- Main editor row --
+        editor_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        editor_row.get_style_context().add_class("inline-editor-row")
+        outer.pack_start(editor_row, True, True, 0)
 
-        # -- Prompt label --
-        self.prompt_label = Gtk.Label(label=" $ ")
+        # -- Prompt chevron --
+        self.prompt_label = Gtk.Label(label=" ❯ ")
         self.prompt_label.set_valign(Gtk.Align.START)
-        self.prompt_label.set_margin_top(4)
+        self.prompt_label.set_margin_top(6)
         self.prompt_label.get_style_context().add_class("inline-editor-prompt")
-        container.pack_start(self.prompt_label, False, False, 0)
+        editor_row.pack_start(self.prompt_label, False, False, 0)
 
         # -- Source view --
         self.buffer = GtkSource.Buffer()
@@ -79,8 +81,8 @@ class InlineEditor(Gtk.Revealer):
         self.view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.view.set_left_margin(2)
         self.view.set_right_margin(4)
-        self.view.set_top_margin(4)
-        self.view.set_bottom_margin(4)
+        self.view.set_top_margin(6)
+        self.view.set_bottom_margin(6)
         self.view.set_monospace(True)
 
         # Shell syntax highlighting
@@ -114,16 +116,31 @@ class InlineEditor(Gtk.Revealer):
         self.scroll.set_max_content_height(MAX_VISIBLE_LINES * 20)
         self.scroll.set_propagate_natural_height(True)
         self.scroll.add(self.view)
-        container.pack_start(self.scroll, True, True, 0)
+        editor_row.pack_start(self.scroll, True, True, 0)
 
-        # -- Run button --
-        run_btn = Gtk.Button(label="⏎")
-        run_btn.set_valign(Gtk.Align.START)
-        run_btn.set_margin_top(2)
+        # -- Right-side controls --
+        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        controls.set_valign(Gtk.Align.START)
+        controls.set_margin_top(2)
+        controls.set_margin_end(4)
+        editor_row.pack_end(controls, False, False, 0)
+
+        # Run button
+        run_btn = Gtk.Button(label="➜")
+        run_btn.get_style_context().add_class("inline-editor-run")
         run_btn.set_relief(Gtk.ReliefStyle.NONE)
-        run_btn.set_tooltip_text("Run command (Enter)")
+        run_btn.set_tooltip_text("Run (Enter) · Ctrl+↑↓ history")
         run_btn.connect("clicked", lambda w: self._submit())
-        container.pack_end(run_btn, False, False, 2)
+        controls.pack_start(run_btn, False, False, 0)
+
+        # -- Status bar (search indicator, hints) --
+        self._status_bar = Gtk.Label(label="")
+        self._status_bar.set_xalign(1.0)
+        self._status_bar.set_margin_end(8)
+        self._status_bar.set_margin_bottom(2)
+        self._status_bar.get_style_context().add_class("inline-editor-status")
+        self._status_bar.set_no_show_all(True)
+        outer.pack_start(self._status_bar, False, False, 0)
 
         # -- Signals --
         self.view.connect("key-press-event", self._on_key_press)
@@ -144,20 +161,43 @@ class InlineEditor(Gtk.Revealer):
         # -- CSS --
         css = Gtk.CssProvider()
         css.load_from_data(b"""
-            .inline-editor-frame {
-                background-color: rgba(40, 42, 46, 0.95);
-                border-top: 1px solid rgba(255, 255, 255, 0.15);
+            .inline-editor-outer {
+                background-color: rgba(30, 32, 36, 0.97);
+                border-top: 1px solid rgba(100, 160, 255, 0.3);
                 border-left: none;
                 border-right: none;
                 border-bottom: none;
-                border-radius: 0;
+                padding: 0;
+            }
+            .inline-editor-row {
                 padding: 2px 4px;
             }
             .inline-editor-prompt {
-                color: rgba(78, 154, 6, 0.9);
+                color: #6EC1E4;
                 font-family: Monospace;
                 font-weight: bold;
-                font-size: 11pt;
+                font-size: 12pt;
+            }
+            .inline-editor-prompt.search-mode {
+                color: #F6D32D;
+            }
+            .inline-editor-run {
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 14pt;
+                padding: 2px 6px;
+                border-radius: 4px;
+                min-width: 0;
+                min-height: 0;
+            }
+            .inline-editor-run:hover {
+                color: #6EC1E4;
+                background-color: rgba(110, 193, 228, 0.15);
+            }
+            .inline-editor-status {
+                color: rgba(255, 255, 255, 0.35);
+                font-family: Monospace;
+                font-size: 9pt;
+                padding: 0 4px;
             }
         """)
         Gtk.StyleContext.add_provider_for_screen(
@@ -365,6 +405,7 @@ class InlineEditor(Gtk.Revealer):
         self._search_text = None
         self._search_matches = []
         self._search_index = -1
+        self._update_status()
 
     def _search_history(self, go_up):
         """Search history by current input. Up = older match, Down = newer / original."""
@@ -392,6 +433,8 @@ class InlineEditor(Gtk.Revealer):
                 self.buffer.place_cursor(self.buffer.get_end_iter())
                 self._inhibit_change = False
 
+        self._update_status()
+
     def _set_match_text(self, text):
         """Set the buffer to a matched command and highlight the search substring."""
         self._inhibit_change = True
@@ -407,6 +450,26 @@ class InlineEditor(Gtk.Revealer):
                 end = self.buffer.get_iter_at_offset(pos + len(self._search_text))
                 self.buffer.apply_tag(self._match_tag, start, end)
         self._inhibit_change = False
+
+    def _update_status(self):
+        """Update the status bar and prompt for search mode."""
+        ctx = self.prompt_label.get_style_context()
+        if self._search_text is not None and self._search_matches:
+            if self._search_index >= 0:
+                pos = self._search_index + 1
+                total = len(self._search_matches)
+                self._status_bar.set_text(f"history {pos}/{total}   Ctrl+↑↓ cycle")
+                self.prompt_label.set_text(" ⟲ ")
+            else:
+                total = len(self._search_matches)
+                self._status_bar.set_text(f"{total} matches   ↑ to search")
+                self.prompt_label.set_text(" ❯ ")
+            ctx.add_class("search-mode")
+            self._status_bar.show()
+        else:
+            ctx.remove_class("search-mode")
+            self.prompt_label.set_text(" ❯ ")
+            self._status_bar.hide()
 
     def _build_matches(self, query):
         """Build a list of history entries matching query.
