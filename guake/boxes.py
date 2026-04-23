@@ -78,19 +78,17 @@ def _find_ancestor(widget, method_name):
 class TerminalHolderChild:
     """Mixin for widgets that live inside a TerminalHolder hierarchy
     (TerminalBox, DualTerminalBox). Provides parent-traversal methods
-    that safely skip intermediate GTK containers."""
+    that safely skip intermediate GTK containers.
+
+    NOTE: get_window and get_settings conflict with Gtk.Widget methods
+    of the same name. Since Gtk.Box/Gtk.Paned come first in the MRO,
+    the Gtk.Widget versions would shadow these. Subclasses MUST
+    explicitly define get_window and get_settings to override Gtk.Widget.
+    """
 
     def get_guake(self):
         a = _find_ancestor(self, 'get_guake')
         return a.get_guake() if a else None
-
-    def get_window(self):
-        a = _find_ancestor(self, 'get_window')
-        return a.get_window() if a else None
-
-    def get_settings(self):
-        a = _find_ancestor(self, 'get_settings')
-        return a.get_settings() if a else None
 
     def get_root_box(self):
         a = _find_ancestor(self, 'get_root_box')
@@ -99,6 +97,16 @@ class TerminalHolderChild:
     def get_notebook(self):
         a = _find_ancestor(self, 'get_notebook')
         return a.get_notebook() if a else None
+
+    def _get_holder_window(self):
+        """Get the Guake application window (not Gdk.Window)."""
+        a = _find_ancestor(self, 'get_window')
+        return a.get_window() if a else None
+
+    def _get_holder_settings(self):
+        """Get Guake Settings (not Gtk.Settings)."""
+        a = _find_ancestor(self, 'get_settings')
+        return a.get_settings() if a else None
 
 import cairo
 import random
@@ -936,6 +944,13 @@ class TerminalBox(Gtk.Box, TerminalHolderChild, TerminalHolder):
 
         return dual_terminal_box
 
+    # Override Gtk.Widget.get_window/get_settings which would shadow the mixin
+    def get_window(self):
+        return self._get_holder_window()
+
+    def get_settings(self):
+        return self._get_holder_settings()
+
     def remove_dead_child(self, child):
         log.warning("remove_dead_child called on TerminalBox, which has no child to remove")
 
@@ -1026,6 +1041,13 @@ class DualTerminalBox(Gtk.Paned, TerminalHolderChild, TerminalHolder):
             self.set_child_second(new)
         else:
             log.error("DualTerminalBox.replace_child: unknown child widget")
+
+    # Override Gtk.Widget.get_window/get_settings which would shadow the mixin
+    def get_window(self):
+        return self._get_holder_window()
+
+    def get_settings(self):
+        return self._get_holder_settings()
 
     def grab_box_terminal_focus(self, box):
         if isinstance(box, DualTerminalBox):
