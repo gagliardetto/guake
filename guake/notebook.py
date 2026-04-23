@@ -618,17 +618,26 @@ class TerminalNotebook(Gtk.Notebook):
 
     def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None, quiet=False):
         terminal_box = TerminalBox()
+        root_terminal_box = RootTerminalBox(self.guake, self)
+        root_terminal_box.set_child(terminal_box)
+
+        if quiet:
+            # Hide BEFORE insertion so the notebook never sees a visible child.
+            # This prevents tab bar growth and window resize/animation.
+            root_terminal_box.set_no_show_all(True)
+            root_terminal_box.hide()
+
+        page_num = self.insert_page(
+            root_terminal_box, None, position if position is not None else -1
+        )
+        self.set_tab_reorderable(root_terminal_box, True)
+
+        # Spawn terminal AFTER the page is inserted (and hidden in quiet mode)
         if empty:
             terminal = None
         else:
             terminal = self.terminal_spawn(directory, open_tab_cwd, terminal_uuid=terminal_uuid, quiet=quiet)
             terminal_box.set_terminal(terminal)
-        root_terminal_box = RootTerminalBox(self.guake, self)
-        root_terminal_box.set_child(terminal_box)
-        page_num = self.insert_page(
-            root_terminal_box, None, position if position is not None else -1
-        )
-        self.set_tab_reorderable(root_terminal_box, True)
 
         if not quiet:
             root_terminal_box.show_all()
@@ -639,12 +648,6 @@ class TerminalNotebook(Gtk.Notebook):
                 self.terminal_attached(terminal)
             self.hide_tabbar_if_one_tab()
             self.update_all_tabs_activity()
-        else:
-            # Hide the page so its tab doesn't appear in the tab bar
-            # and doesn't cause the window to resize/re-animate.
-            # switch_to_workspace will show it later.
-            root_terminal_box.set_no_show_all(True)
-            root_terminal_box.hide()
 
         if self.guake:
             root_terminal_box.connect_after("draw", self.guake.background_image_manager.draw)
