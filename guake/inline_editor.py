@@ -14,6 +14,7 @@ Activated when the shell emits a prompt_start event (input phase).
 Deactivated when the user submits a command or the shell starts executing.
 """
 import logging
+import os
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -42,6 +43,10 @@ class InlineEditor(Gtk.Revealer):
         self._user_dismissed = False
         self._history_index = -1
         self._history = []
+        self._shell_history = []  # loaded from history file
+        self._shell_history_loaded = False
+        self._ghost_text = None   # current ghost suggestion (suffix only)
+        self._inhibit_ghost = False  # prevent re-entrant ghost updates
 
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self.set_transition_duration(150)
@@ -87,6 +92,13 @@ class InlineEditor(Gtk.Revealer):
             if scheme:
                 self.buffer.set_style_scheme(scheme)
                 break
+
+        # Ghost text tag for autocomplete suggestions (Fish-style)
+        self._ghost_tag = self.buffer.create_tag(
+            "ghost-completion",
+            foreground="rgba(255,255,255,0.3)",
+            editable=False,
+        )
 
         # Font matching the terminal
         font_desc = Pango.FontDescription("Monospace 11")
@@ -154,8 +166,11 @@ class InlineEditor(Gtk.Revealer):
         """Show the editor (shell is waiting for input)."""
         if self._active or self._user_dismissed:
             return
+        if not self._shell_history_loaded:
+            self._load_shell_history()
         self._active = True
         self.clear_cursors()
+        self._clear_ghost()
         self.buffer.set_text("")
         self.set_reveal_child(True)
         GLib.idle_add(self._grab_focus)
@@ -197,11 +212,11 @@ class InlineEditor(Gtk.Revealer):
 
     def _submit(self):
         """Feed the editor content to the terminal as a command."""
-        text = self.buffer.get_text(
-            self.buffer.get_start_iter(),
-            self.buffer.get_end_iter(),
-            False,
-        ).strip()
+        # Get only user-typed text, not ghost suggestion
+        text = self._get_user_text().strip()
+
+        # Clear ghost before clearing buffer
+        self._clear_ghost()
 
         if not text:
             # Empty input — just send Enter so the shell shows a new prompt
@@ -266,10 +281,21 @@ class InlineEditor(Gtk.Revealer):
             self.view.emit("cut-clipboard")
             return True
 
-        # Tab → pass to terminal for shell completion
+        # Tab → accept ghost completion if present, else shell completion
         if keyval == Gdk.KEY_Tab and not state:
+            if self._ghost_text:
+                self._accept_ghost()
+                return True
             self._request_completion()
             return True
+
+        # Right arrow at end of line → accept ghost completion
+        if keyval == Gdk.KEY_Right and not state:
+            insert = self.buffer.get_iter_at_mark(self.buffer.get_insert())
+            user_end = self._get_user_text_end()
+            if insert.compare(user_end) >= 0 and self._ghost_text:
+                self._accept_ghost()
+                return True
 
         # Ctrl+D → match selection and add cursor (EOF only on empty editor without selection)
         if keyval == Gdk.KEY_d and state == Gdk.ModifierType.CONTROL_MASK:
@@ -368,11 +394,8 @@ class InlineEditor(Gtk.Revealer):
         """Send the current partial input + Tab to the terminal for
         shell completion. The completion result will appear in the
         terminal output (we can't easily capture it back yet)."""
-        text = self.buffer.get_text(
-            self.buffer.get_start_iter(),
-            self.buffer.get_end_iter(),
-            False,
-        )
+        text = self._get_user_text()
+        self._clear_ghost()
         # Clear the terminal's current input line, type our text, and press Tab
         self.terminal.feed_child("\x15")  # Ctrl+U: kill line
         self.terminal.feed_child(text)
@@ -384,12 +407,166 @@ class InlineEditor(Gtk.Revealer):
     # ---- Auto-resize ----
 
     def _on_buffer_changed(self, buffer):
-        """Auto-resize the editor height based on content."""
+        """Auto-resize the editor height and update ghost completion."""
         line_count = buffer.get_line_count()
         visible_lines = min(line_count, MAX_VISIBLE_LINES)
-        # Approximate line height
         target_height = max(MIN_HEIGHT, visible_lines * 20)
         self.scroll.set_min_content_height(target_height)
+
+        # Update ghost text completion (skip if we're inserting ghost text)
+        if not self._inhibit_ghost:
+            GLib.idle_add(self._update_ghost)
+
+    # ---- Shell history loading ----
+
+    def _load_shell_history(self):
+        """Load command history from the shell's history file."""
+        self._shell_history_loaded = True
+        history_entries = []
+
+        # Try multiple history files in order of preference
+        home = os.path.expanduser("~")
+        candidates = [
+            (os.path.join(home, ".zsh_history"), "zsh"),
+            (os.path.join(home, ".bash_history"), "bash"),
+            (os.path.join(home, ".local", "share", "fish", "fish_history"), "fish"),
+        ]
+
+        for path, shell_type in candidates:
+            if os.path.exists(path):
+                try:
+                    history_entries = self._parse_history_file(path, shell_type)
+                    log.info("Loaded %d history entries from %s", len(history_entries), path)
+                    break
+                except Exception as e:
+                    log.debug("Failed to read history file %s: %s", path, e)
+
+        # Deduplicate preserving most-recent order (last occurrence wins)
+        seen = {}
+        for entry in history_entries:
+            seen[entry] = True
+        self._shell_history = list(seen.keys())
+
+    def _parse_history_file(self, path, shell_type):
+        """Parse a shell history file, handling shell-specific formats."""
+        entries = []
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                if shell_type == "zsh":
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        # Zsh extended history: ": timestamp:0;command"
+                        if line.startswith(": ") and ";" in line:
+                            line = line.split(";", 1)[1]
+                        entries.append(line)
+                elif shell_type == "fish":
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("- cmd: "):
+                            entries.append(line[7:])
+                else:
+                    # Bash — one command per line
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            entries.append(line)
+        except Exception as e:
+            log.debug("Error parsing history file %s: %s", path, e)
+        return entries
+
+    # ---- Ghost text completion (Fish-style) ----
+
+    def _get_user_text(self):
+        """Get only the user-typed text (excluding ghost suggestion)."""
+        start = self.buffer.get_start_iter()
+        end = self.buffer.get_end_iter()
+        full = self.buffer.get_text(start, end, False)
+        if self._ghost_text and full.endswith(self._ghost_text):
+            return full[:-len(self._ghost_text)]
+        return full
+
+    def _get_user_text_end(self):
+        """Get the iter position where user text ends (before ghost)."""
+        if self._ghost_text:
+            end = self.buffer.get_end_iter()
+            end.backward_chars(len(self._ghost_text))
+            return end
+        return self.buffer.get_end_iter()
+
+    def _clear_ghost(self):
+        """Remove any ghost text from the buffer."""
+        if self._ghost_text:
+            self._inhibit_ghost = True
+            user_end = self._get_user_text_end()
+            buf_end = self.buffer.get_end_iter()
+            self.buffer.delete(user_end, buf_end)
+            self._ghost_text = None
+            self._inhibit_ghost = False
+
+    def _update_ghost(self):
+        """Find the best matching history entry and show it as ghost text."""
+        if not self._active:
+            return False
+
+        # Get user text without existing ghost
+        user_text = self._get_user_text()
+
+        # Clear old ghost first
+        self._clear_ghost()
+
+        # Only suggest if there's some input (at least 2 chars)
+        if len(user_text) < 2:
+            return False
+
+        # Don't suggest during history navigation
+        if self._history_index != -1:
+            return False
+
+        # Search recent history (reverse order — most recent first)
+        suggestion = None
+        # Check local session history first, then shell history
+        for history in (reversed(self._history), reversed(self._shell_history)):
+            for entry in history:
+                if entry.startswith(user_text) and entry != user_text:
+                    suggestion = entry
+                    break
+            if suggestion:
+                break
+
+        if suggestion:
+            # Insert the suffix as ghost text
+            suffix = suggestion[len(user_text):]
+            self._inhibit_ghost = True
+            end = self.buffer.get_end_iter()
+            self.buffer.insert(end, suffix)
+            # Apply ghost tag to the suffix
+            ghost_start = self.buffer.get_end_iter()
+            ghost_start.backward_chars(len(suffix))
+            ghost_end = self.buffer.get_end_iter()
+            self.buffer.apply_tag(self._ghost_tag, ghost_start, ghost_end)
+            # Move cursor back to before the ghost text
+            self.buffer.place_cursor(ghost_start)
+            self._ghost_text = suffix
+            self._inhibit_ghost = False
+
+        return False  # one-shot idle
+
+    def _accept_ghost(self):
+        """Accept the ghost suggestion — make it real text."""
+        if not self._ghost_text:
+            return
+        suffix = self._ghost_text
+        self._ghost_text = None
+        self._inhibit_ghost = True
+        # Remove the ghost tag from the text (keep the text, remove styling)
+        start = self.buffer.get_start_iter()
+        end = self.buffer.get_end_iter()
+        self.buffer.remove_tag(self._ghost_tag, start, end)
+        # Place cursor at end
+        self.buffer.place_cursor(self.buffer.get_end_iter())
+        self._inhibit_ghost = False
 
     # ---- Public API ----
 
