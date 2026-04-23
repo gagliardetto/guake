@@ -441,12 +441,15 @@ class TerminalBox(Gtk.Box, TerminalHolder):
     """A box to group the terminal and a scrollbar."""
 
     MINIMAP_REFRESH_MS = 250  # max refresh rate for minimap content
+    MINIMAP_ROW_HEIGHT = 2
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL)
         self.terminal = None
         self._minimap_refresh_timer_id = None
-        self._minimap_lines_cache = None  # pre-processed lines for drawing
+        self._minimap_line_lengths = None   # list of int — length of each line
+        self._minimap_content_surface = None  # cached Cairo surface for content layer
+        self._minimap_col_count = 80        # terminal column count at last refresh
 
     def set_terminal(self, terminal):
         """Packs the terminal widget."""
@@ -474,14 +477,11 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         self.scroll = Gtk.Scrollbar.new(Gtk.Orientation.VERTICAL, adj)
         self.scroll.show()
 
-        # Your minimap setup code here
-        term = self.terminal
-        col_count = term.get_column_count()
+        # Minimap setup
         self.minimap = Gtk.DrawingArea()
-        self.minimap.set_size_request(col_count*(self.get_minimap_row_height() - 1), 100)  # for example
-        # Connect the scroll event to the handler
+        self.minimap.set_size_request(60, 100)
         self.minimap.add_events(Gdk.EventMask.SCROLL_MASK)
-        self.minimap.set_sensitive(True) # make sure the minimap can be scrolled
+        self.minimap.set_sensitive(True)
         self.minimap.connect("scroll-event", self.on_scroll_minimap)
         self.minimap.show()
 
@@ -520,83 +520,94 @@ class TerminalBox(Gtk.Box, TerminalHolder):
 
 
     def on_draw_minimap(self, widget, cr):
-        # Get dimensions
         m_width = widget.get_allocated_width()
         m_height = widget.get_allocated_height()
 
-        # Set Cairo properties (e.g., font, font size)
-        cr.set_source_rgb(0, 1, 0)  # Green text
-        cr.select_font_face("Mono", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(self.get_minimap_row_height() - 1)
+        # Draw cached content surface (only regenerated on content change)
+        if self._minimap_content_surface:
+            cr.set_source_surface(self._minimap_content_surface, 0, 0)
+            cr.paint()
 
+        # Draw the scrolling viewfinder (cheap — just a rectangle)
+        self._draw_viewfinder(cr, m_width, m_height)
+
+    def _rebuild_content_surface(self):
+        """Rebuild the cached minimap content surface from line-length data.
+
+        Shows ALL terminal lines compressed into the minimap height (like VS Code).
+        Each pixel row may represent multiple terminal lines — the bar shows the
+        max line length in that group. Only rebuilt on content change, NOT on scroll.
+        """
+        if not self._minimap_line_lengths or not self.minimap:
+            self._minimap_content_surface = None
+            return
+
+        m_width = self.minimap.get_allocated_width()
+        m_height = self.minimap.get_allocated_height()
+        if m_width <= 0 or m_height <= 0:
+            return
+
+        rh = self.MINIMAP_ROW_HEIGHT
+        visible_rows = max(int(m_height / rh), 1)
+        col_count = max(self._minimap_col_count, 1)
+        total_lines = len(self._minimap_line_lengths)
+
+        # Create an offscreen surface
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, m_width, m_height)
+        scr = cairo.Context(surface)
+
+        # How many terminal lines does each minimap pixel-row represent?
+        lines_per_row = max(total_lines / visible_rows, 1.0)
+
+        for row in range(min(visible_rows, total_lines)):
+            # Determine which terminal lines map to this minimap row
+            src_start = int(row * lines_per_row)
+            src_end = min(int((row + 1) * lines_per_row), total_lines)
+            if src_start >= total_lines:
+                break
+
+            group = self._minimap_line_lengths[src_start:src_end]
+            if not group:
+                continue
+
+            max_len = max(group)
+            if max_len == 0:
+                continue
+
+            # Bar width proportional to max line length in group
+            bar_w = max(1, int((max_len / col_count) * m_width))
+            y = row * rh
+
+            # Brightness reflects density (how many non-empty lines in group)
+            non_empty = sum(1 for l in group if l > 0)
+            density = non_empty / len(group)
+            intensity = 0.2 + 0.6 * density
+            scr.set_source_rgba(0.1, intensity, 0.2, 0.85)
+            scr.rectangle(0, y, bar_w, max(rh - 1, 1))
+            scr.fill()
+
+        self._minimap_content_surface = surface
+
+    def _draw_viewfinder(self, cr, width, height):
         adj = self.terminal.get_vadjustment()
-        total_rows = adj.get_upper() # the total number of rows in the terminal
-        t_first_visible_row = adj.get_value() # the number of rows above the top of the terminal
-        m_page = m_height / self.get_minimap_row_height()
-        t_page = adj.get_page_size() # the number of rows visible in the terminal
+        total_rows = adj.get_upper()
+        first_visible_row = adj.get_value()
+        page_size = adj.get_page_size()
 
-        t_range_end = total_rows - t_page
-        m_range_end = total_rows - m_page
+        if total_rows <= 0:
+            return
 
-        # calculate start and stop rows of the minimap
-        m_start = 0
-        if t_first_visible_row > 0 and t_range_end > 0:
-            ratio = t_first_visible_row / t_range_end
-            m_start = ratio * max(m_range_end, 0)
+        # Map the terminal's visible region onto the minimap's pixel space
+        scale = height / total_rows if total_rows > 0 else 1.0
+        vf_top = first_visible_row * scale
+        vf_height = max(page_size * scale, 4)  # minimum 4px so it's always visible
 
-        starting_row = int(m_start)
-
-        if self._minimap_lines_cache:
-            drawn_lines = 0
-            for i, line in enumerate(self._minimap_lines_cache):
-                if i < starting_row:
-                    continue
-                if drawn_lines >= m_page:
-                    break
-                y_coordinate = drawn_lines * self.get_minimap_row_height()
-                drawn_lines += 1
-                cr.move_to(0, y_coordinate)
-                clean_line = line.replace('\x00', '')
-                cr.show_text(clean_line)
-        
-        # Draw the scrolling viewfinder
-        self.draw_viewfinder(cr, m_width, m_height)
+        cr.set_source_rgba(1, 1, 1, 0.25)
+        cr.rectangle(0, vf_top, width, vf_height)
+        cr.fill()
 
     def get_minimap_row_height(self):
-        return 2
-
-    def draw_viewfinder(self, cr, width, height):
-        adj = self.terminal.get_vadjustment()
-        page_increment = adj.get_page_increment()
-        total_rows = adj.get_upper()  # the total number of rows in the terminal
-        first_visible_row = adj.get_value()  # the number of rows above the top of the terminal
-
-        # Calculate the height of the viewfinder
-        viewfinder_height = page_increment * self.get_minimap_row_height()
-
-        how_many_rows_fit_in_minimap = height / self.get_minimap_row_height()
-        if total_rows < how_many_rows_fit_in_minimap:
-            how_many_rows_fit_in_minimap = total_rows
-
-        max_visible_row = total_rows - page_increment
-
-        viewfinder_top_y = 0
-        if max_visible_row > 0:
-            # calculate the ratio between max_visible_row and first_visible_row; e.g. 10 rows, 5 rows visible, ratio is 0.5
-            ratio = first_visible_row / max_visible_row
-
-            # now apply that ratio to how_many_rows_fit_in_minimap
-            ratio_2 = ratio * (how_many_rows_fit_in_minimap - page_increment)
-
-            # Calculate the top of the viewfinder
-            viewfinder_top_y = ratio_2 * self.get_minimap_row_height()
-        elif max_visible_row == 0:
-            viewfinder_top_y = first_visible_row * self.get_minimap_row_height()
-        
-        # Draw the viewfinder
-        cr.set_source_rgba(1, 1, 1, 0.5)
-        cr.rectangle(0, viewfinder_top_y, self.minimap.get_allocated_width(), viewfinder_height)
-        cr.fill()
+        return self.MINIMAP_ROW_HEIGHT
 
     def on_terminal_content_changed(self, terminal, minimap):
         """Debounced handler: schedule a minimap refresh instead of reading
@@ -607,7 +618,7 @@ class TerminalBox(Gtk.Box, TerminalHolder):
             )
 
     def _do_minimap_refresh(self):
-        """Actually read terminal content and update the minimap.
+        """Read terminal content and extract line lengths for the minimap.
         Runs at most once per MINIMAP_REFRESH_MS."""
         self._minimap_refresh_timer_id = None
         if not self.terminal:
@@ -622,18 +633,22 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         except Exception:
             return False
 
-        # Pre-process lines: split by newline and wrap long lines.
-        # Cache the result so on_draw_minimap doesn't redo this work.
+        # Extract only line lengths (compact int list — no text stored)
         t_width = self.terminal.get_column_count()
-        processed = []
+        self._minimap_col_count = t_width
+        lengths = []
         for line in raw_content.split('\n'):
-            if len(line) > t_width:
-                for i in range(0, len(line), t_width):
-                    processed.append(line[i:i + t_width])
+            stripped = line.rstrip('\x00')
+            if len(stripped) > t_width:
+                # Account for wrapped lines
+                for i in range(0, len(stripped), t_width):
+                    lengths.append(min(len(stripped) - i, t_width))
             else:
-                processed.append(line)
-        self._minimap_lines_cache = processed
+                lengths.append(len(stripped))
+        self._minimap_line_lengths = lengths
 
+        # Rebuild the cached content surface and trigger a redraw
+        self._rebuild_content_surface()
         self.minimap.queue_draw()
         return False  # one-shot timer
 
@@ -677,7 +692,8 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         if self._minimap_refresh_timer_id is not None:
             GLib.source_remove(self._minimap_refresh_timer_id)
             self._minimap_refresh_timer_id = None
-        self._minimap_lines_cache = None
+        self._minimap_line_lengths = None
+        self._minimap_content_surface = None
         self.terminal = None
 
     def split_h(self, split_percentage: int = 50):
