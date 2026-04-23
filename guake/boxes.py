@@ -616,7 +616,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             self.on_search_next_clicked(None)
 
 
-class TerminalBox(Gtk.Box, TerminalHolder, TerminalHolderChild):
+class TerminalBox(Gtk.Box, TerminalHolderChild, TerminalHolder):
 
     """A box to group the terminal and a scrollbar."""
 
@@ -982,7 +982,7 @@ class TerminalBox(Gtk.Box, TerminalHolder, TerminalHolderChild):
         return False
 
 
-class DualTerminalBox(Gtk.Paned, TerminalHolder, TerminalHolderChild):
+class DualTerminalBox(Gtk.Paned, TerminalHolderChild, TerminalHolder):
 
     ORIENT_H = 0
     ORIENT_V = 1
