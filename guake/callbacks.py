@@ -166,10 +166,18 @@ class NotebookScrollCallback:
 
     def on_scroll(self, widget, event):
         direction = event.get_scroll_direction().direction
-        if direction is Gdk.ScrollDirection.DOWN or direction is Gdk.ScrollDirection.RIGHT:
-            self.notebook.next_page()
+        if hasattr(self.notebook, 'guake') and self.notebook.guake:
+            # Use workspace-aware navigation that skips hidden pages
+            if direction is Gdk.ScrollDirection.DOWN or direction is Gdk.ScrollDirection.RIGHT:
+                self.notebook.guake.accel_next()
+            else:
+                self.notebook.guake.accel_prev()
         else:
-            self.notebook.prev_page()
+            # Fallback for notebooks without guake attached
+            if direction is Gdk.ScrollDirection.DOWN or direction is Gdk.ScrollDirection.RIGHT:
+                self.notebook.next_page()
+            else:
+                self.notebook.prev_page()
         # important to return True to stop propagation of the event
         # from the label up to the notebook
         return True

@@ -758,25 +758,41 @@ class Guake(SimpleGladeApp):
         self.add_tab(open_tab_cwd=True)
         return True
 
+    def _get_visible_page_count(self):
+        """Returns the number of visible pages in the current notebook."""
+        nb = self.get_notebook()
+        return sum(1 for i in range(nb.get_n_pages()) if nb.get_nth_page(i).get_visible())
+
     def accel_prev(self, *args):
         nb = self.get_notebook()
-        nb.set_current_page(nb.get_n_pages() - 1 if nb.get_current_page() == 0 else nb.get_current_page() - 1)
+        visible_count = self._get_visible_page_count()
+        if visible_count <= 1:
+            return True
+        current = nb.get_current_page()
+        nb.set_current_page(visible_count - 1 if current == 0 else current - 1)
         return True
 
     def accel_next(self, *args):
         nb = self.get_notebook()
-        nb.set_current_page(0 if nb.get_current_page() + 1 == nb.get_n_pages() else nb.get_current_page() + 1)
+        visible_count = self._get_visible_page_count()
+        if visible_count <= 1:
+            return True
+        current = nb.get_current_page()
+        nb.set_current_page(0 if current + 1 >= visible_count else current + 1)
         return True
 
     def accel_move_tab_left(self, *args):
-        pos = self.get_notebook().get_current_page()
+        nb = self.get_notebook()
+        pos = nb.get_current_page()
         if pos > 0:
             self.move_tab(pos, pos - 1)
         return True
 
     def accel_move_tab_right(self, *args):
-        pos = self.get_notebook().get_current_page()
-        if pos < self.get_notebook().get_n_pages() - 1:
+        nb = self.get_notebook()
+        pos = nb.get_current_page()
+        visible_count = self._get_visible_page_count()
+        if pos < visible_count - 1:
             self.move_tab(pos, pos + 1)
         return True
 
@@ -787,10 +803,17 @@ class Guake(SimpleGladeApp):
         nb.set_current_page(new_tab_pos)
 
     def gen_accel_switch_tabN(self, N):
-        return lambda *args: (self.get_notebook().set_current_page(N) if 0 <= N < self.get_notebook().get_n_pages() else None, True)[1]
+        def switch(*args):
+            visible_count = self._get_visible_page_count()
+            if 0 <= N < visible_count:
+                self.get_notebook().set_current_page(N)
+            return True
+        return switch
 
     def accel_switch_tab_last(self, *args):
-        self.get_notebook().set_current_page(self.get_notebook().get_n_pages() - 1)
+        visible_count = self._get_visible_page_count()
+        if visible_count > 0:
+            self.get_notebook().set_current_page(visible_count - 1)
         return True
 
     def accel_rename_current_tab(self, *args):
