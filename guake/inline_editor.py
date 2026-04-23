@@ -100,6 +100,13 @@ class InlineEditor(Gtk.Revealer):
         font_desc = Pango.FontDescription("Monospace 11")
         self.view.override_font(font_desc)
 
+        # Tag for highlighting the matched substring in history search
+        self._match_tag = self.buffer.create_tag(
+            "search-match",
+            foreground="#F6D32D",
+            weight=Pango.Weight.BOLD,
+        )
+
         # Scrolled window for multi-line support
         self.scroll = Gtk.ScrolledWindow()
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -365,20 +372,33 @@ class InlineEditor(Gtk.Revealer):
             # Move to next older match
             if self._search_index + 1 < len(self._search_matches):
                 self._search_index += 1
-                self.buffer.set_text(self._search_matches[self._search_index])
-                self.buffer.place_cursor(self.buffer.get_end_iter())
+                self._set_match_text(self._search_matches[self._search_index])
         else:
             # Move to newer match, or back to original text
             if self._search_index > 0:
                 self._search_index -= 1
-                self.buffer.set_text(self._search_matches[self._search_index])
-                self.buffer.place_cursor(self.buffer.get_end_iter())
+                self._set_match_text(self._search_matches[self._search_index])
             elif self._search_index == 0:
                 # Back to original text
                 self._search_index = -1
                 self.buffer.set_text(self._search_text or "")
                 self.buffer.place_cursor(self.buffer.get_end_iter())
             # else: already at original text, do nothing
+
+    def _set_match_text(self, text):
+        """Set the buffer to a matched command and highlight the search substring."""
+        self.buffer.set_text(text)
+        self.buffer.place_cursor(self.buffer.get_end_iter())
+
+        if self._search_text:
+            # Find the search string (case-insensitive) and highlight it
+            text_lower = text.lower()
+            query_lower = self._search_text.lower()
+            pos = text_lower.find(query_lower)
+            if pos >= 0:
+                start = self.buffer.get_iter_at_offset(pos)
+                end = self.buffer.get_iter_at_offset(pos + len(self._search_text))
+                self.buffer.apply_tag(self._match_tag, start, end)
 
     def _build_matches(self, query):
         """Build a list of history entries matching query.
