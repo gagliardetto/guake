@@ -394,9 +394,14 @@ class BlockOverlay:
                 self._draw_exit_badge(cr, cmd_y, char_h, block)
                 self._draw_duration(cr, cmd_y, char_h, width, block)
 
-            # Background tint for failed blocks
+            # Background tint for failed blocks (skip expected exit codes
+            # and blocks with huge output like SSH/vim that take over the terminal)
             if block.exit_code and block.exit_code != 0:
-                self._draw_error_tint(cr, block, width, height, visible_top, visible_bottom)
+                # 130 = Ctrl+C, 255 = SSH, 126/127 = not found, 128+N = signal
+                if block.exit_code not in (126, 127, 130, 255) and block.exit_code < 128:
+                    output_lines = block.end_row - (block.command_row or block.prompt_row)
+                    if output_lines < 200:  # skip TUI apps that filled the screen
+                        self._draw_error_tint(cr, block, width, height, visible_top, visible_bottom)
 
         return False  # Allow event pass-through
 
