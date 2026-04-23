@@ -157,23 +157,22 @@ class WorkspaceManager:
             all_terminal_uuids = all_session_uuids
             is_startup_restore = True
 
-        # First, clean up any "ghost" terminals from our workspace data that no longer exist.
-        # This is safe to do in both startup and runtime scenarios.
+        # First, clean up any "ghost" terminals from ALL workspaces (including
+        # "No workspace") that reference terminals that no longer exist.
         for ws in self.workspaces_data.get("workspaces", []):
-            if ws.get('id') != ZERO_UUID:
-                terminals = ws.get("terminals", [])
-                ws["terminals"] = [tid for tid in terminals if tid in all_terminal_uuids]
+            terminals = ws.get("terminals", [])
+            ws["terminals"] = [tid for tid in terminals if tid in all_terminal_uuids]
 
         # Only search for and reassign orphans during normal runtime. During startup,
         # terminals are restored but not yet assigned, so they would all be incorrectly
         # flagged as orphans.
         if not is_startup_restore:
-            assigned_regular_uuids = set()
+            # Collect terminals assigned to ANY workspace (including "No workspace")
+            all_assigned_uuids = set()
             for ws in self.workspaces_data.get("workspaces", []):
-                if ws.get('id') != ZERO_UUID:
-                    assigned_regular_uuids.update(ws.get("terminals", []))
+                all_assigned_uuids.update(ws.get("terminals", []))
 
-            orphan_uuids = all_terminal_uuids - assigned_regular_uuids
+            orphan_uuids = all_terminal_uuids - all_assigned_uuids
 
             if orphan_uuids:
                 log.info("Found %d orphan tabs. Assigning to 'No workspace'.", len(orphan_uuids))
@@ -188,6 +187,13 @@ class WorkspaceManager:
                 existing_zero_terminals = set(zero_workspace.get("terminals", []))
                 existing_zero_terminals.update(orphan_uuids)
                 zero_workspace["terminals"] = list(existing_zero_terminals)
+
+        # Clean up: remove "No workspace" if it's empty
+        zero_workspace = self.get_workspace_by_id(ZERO_UUID)
+        if zero_workspace and not zero_workspace.get("terminals"):
+            self.workspaces_data["workspaces"] = [
+                w for w in self.workspaces_data["workspaces"] if w.get("id") != ZERO_UUID
+            ]
 
         self.save_workspaces()
         self._build_workspace_list()
@@ -526,10 +532,35 @@ class WorkspaceManager:
                 return
         log.warning("Workspace %s not found in the list.", workspace_id)
 
+    def _remove_terminal_from_all_workspaces(self, terminal_uuid):
+        """Removes a terminal UUID from every workspace it appears in.
+
+        Returns the workspace it was removed from (for active_terminal fixup),
+        or None if it wasn't found anywhere.
+        """
+        removed_from = None
+        for ws in self.get_all_workspaces():
+            terminals = ws.get("terminals", [])
+            if terminal_uuid in terminals:
+                # Remove all occurrences (handles within-workspace duplicates)
+                ws["terminals"] = [t for t in terminals if t != terminal_uuid]
+                if ws.get("active_terminal") == terminal_uuid:
+                    if ws["terminals"]:
+                        # Select the terminal that was next to the removed one
+                        old_idx = terminals.index(terminal_uuid)
+                        new_idx = min(old_idx, len(ws["terminals"]) - 1)
+                        ws["active_terminal"] = ws["terminals"][new_idx]
+                    else:
+                        ws["active_terminal"] = None
+                removed_from = ws
+        return removed_from
+
     def add_terminal_to_workspace(self, terminal_uuid, workspace_id):
         """Adds a terminal to a specific workspace and saves the state."""
         ws = self.get_workspace_by_id(workspace_id)
         if ws:
+            # Ensure exclusive membership: remove from any other workspace first
+            self._remove_terminal_from_all_workspaces(terminal_uuid)
             ws.setdefault("terminals", []).append(terminal_uuid)
             ws["active_terminal"] = terminal_uuid
             self.save_workspaces()
@@ -547,6 +578,8 @@ class WorkspaceManager:
             active_ws = target_ws
 
         if active_ws:
+            # Ensure exclusive membership: remove from any other workspace first
+            self._remove_terminal_from_all_workspaces(terminal_uuid)
             terminals = active_ws.setdefault("terminals", [])
             active_terminal = active_ws.get("active_terminal")
             # Insert after the currently active terminal so the workspace order
@@ -561,20 +594,14 @@ class WorkspaceManager:
             self._build_workspace_list()
 
     def remove_terminal_from_active_workspace(self, terminal_uuid):
-        active_ws = self.get_active_workspace()
-        if active_ws and terminal_uuid in active_ws.get("terminals", []):
-            terminals = active_ws["terminals"]
-            idx = terminals.index(terminal_uuid)
-            terminals.pop(idx)
+        """Removes a terminal from whichever workspace(s) it belongs to.
 
-            if active_ws.get("active_terminal") == terminal_uuid:
-                if terminals:
-                    # If the closed tab was the last one, select the new last tab.
-                    # Otherwise, select the tab that is now at the same index.
-                    new_idx = min(idx, len(terminals) - 1)
-                    active_ws["active_terminal"] = terminals[new_idx]
-                else:
-                    active_ws["active_terminal"] = None
+        Despite the name (kept for API compatibility), this removes the terminal
+        from ALL workspaces to prevent ghost entries if the terminal was
+        accidentally assigned to multiple workspaces.
+        """
+        removed_from = self._remove_terminal_from_all_workspaces(terminal_uuid)
+        if removed_from is not None:
             self.save_workspaces()
             self._build_workspace_list()
 
@@ -599,26 +626,17 @@ class WorkspaceManager:
             self.save_workspaces()
 
     def move_terminal_to_workspace(self, terminal_uuid, target_workspace_id):
-        source_ws = next((w for w in self.get_all_workspaces() if terminal_uuid in w.get("terminals", [])), None)
         target_ws = self.get_workspace_by_id(target_workspace_id)
+        if not target_ws:
+            return
 
-        if source_ws and target_ws and source_ws != target_ws:
-            terminals = source_ws["terminals"]
-            idx = terminals.index(terminal_uuid)
-            terminals.pop(idx)
-            if source_ws.get("active_terminal") == terminal_uuid:
-                if terminals:
-                    # This logic is now consistent with remove_terminal_from_active_workspace.
-                    # It selects the next terminal, or the new last one if the removed
-                    # terminal was the last one, matching the behavior of closing a tab.
-                    new_idx = min(idx, len(terminals) - 1)
-                    source_ws["active_terminal"] = terminals[new_idx]
-                else:
-                    source_ws["active_terminal"] = None
+        # Remove from ALL workspaces (handles duplicates, multi-membership)
+        self._remove_terminal_from_all_workspaces(terminal_uuid)
 
-            target_ws.setdefault("terminals", []).append(terminal_uuid)
-            self.save_workspaces()
-            self._build_workspace_list()
+        # Add to target
+        target_ws.setdefault("terminals", []).append(terminal_uuid)
+        self.save_workspaces()
+        self._build_workspace_list()
 
     def get_all_workspaces(self):
         return self.workspaces_data.get("workspaces", [])
@@ -749,7 +767,12 @@ class WorkspaceManager:
                 remaining_workspaces = [w for w in self.get_all_workspaces() if w["id"] != workspace_id]
                 if remaining_workspaces:
                     first_ws = remaining_workspaces[0]
-                    first_ws.setdefault("terminals", []).extend(ws["terminals"])
+                    existing = set(first_ws.get("terminals", []))
+                    # Only add terminals that aren't already in the target workspace
+                    for tid in ws["terminals"]:
+                        if tid not in existing:
+                            first_ws.setdefault("terminals", []).append(tid)
+                            existing.add(tid)
 
             self.workspaces_data["workspaces"] = [w for w in self.workspaces_data["workspaces"] if w["id"] != workspace_id]
             
