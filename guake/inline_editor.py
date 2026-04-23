@@ -41,17 +41,15 @@ class InlineEditor(Gtk.Revealer):
         self.block_model = block_model
         self._active = False
         self._user_dismissed = False
-        self._history_index = -1
         self._history = []
         self._shell_history = []  # loaded from history file
         self._shell_history_loaded = False
         self._history_mtime = 0   # mtime of last loaded history file
         self._history_path = None # path to the history file
-        self._ghost_text = None   # current ghost suggestion (suffix only)
-        self._ghost_matches = []  # all matching commands for current input
-        self._ghost_match_index = -1  # current position in matches
-        self._ghost_search_text = None  # user's original search text
-        self._inhibit_ghost = False  # prevent re-entrant ghost updates
+        # History search state
+        self._search_text = None   # original text when search started
+        self._search_matches = []  # matching commands
+        self._search_index = -1    # position in matches (-1 = original text)
 
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self.set_transition_duration(150)
@@ -97,13 +95,6 @@ class InlineEditor(Gtk.Revealer):
             if scheme:
                 self.buffer.set_style_scheme(scheme)
                 break
-
-        # Ghost text tag for autocomplete suggestions (Fish-style)
-        self._ghost_tag = self.buffer.create_tag(
-            "ghost-completion",
-            foreground="rgba(255,255,255,0.3)",
-            editable=False,
-        )
 
         # Font matching the terminal
         font_desc = Pango.FontDescription("Monospace 11")
@@ -171,11 +162,10 @@ class InlineEditor(Gtk.Revealer):
         """Show the editor (shell is waiting for input)."""
         if self._active or self._user_dismissed:
             return
-        # Reload history if the file has been modified since last load
         self._maybe_reload_history()
         self._active = True
         self.clear_cursors()
-        self._clear_ghost()
+        self._reset_search()
         self.buffer.set_text("")
         self.set_reveal_child(True)
         GLib.idle_add(self._grab_focus)
@@ -185,7 +175,7 @@ class InlineEditor(Gtk.Revealer):
         if not self._active:
             return
         self._active = False
-        self._clear_ghost()
+        self._reset_search()
         self.clear_cursors()
         self.set_reveal_child(False)
         # Return focus to terminal (guard against destroyed widget)
@@ -218,11 +208,11 @@ class InlineEditor(Gtk.Revealer):
 
     def _submit(self):
         """Feed the editor content to the terminal as a command."""
-        # Get only user-typed text, not ghost suggestion
-        text = self._get_user_text().strip()
-
-        # Clear ghost before clearing buffer
-        self._clear_ghost()
+        text = self.buffer.get_text(
+            self.buffer.get_start_iter(),
+            self.buffer.get_end_iter(),
+            False,
+        ).strip()
 
         if not text:
             # Empty input — just send Enter so the shell shows a new prompt
@@ -234,7 +224,7 @@ class InlineEditor(Gtk.Revealer):
             self._history.append(text)
             if len(self._history) > 500:
                 self._history = self._history[-400:]
-        self._history_index = -1
+        self._reset_search()
 
         # Feed to terminal
         self.terminal.feed_child(text + "\n")
@@ -273,7 +263,7 @@ class InlineEditor(Gtk.Revealer):
             if self.buffer.get_has_selection():
                 self.view.emit("copy-clipboard")
                 return True
-            self._clear_ghost()
+            self._reset_search()
             self.buffer.set_text("")
             self.terminal.feed_child("\x03")
             return True
@@ -288,21 +278,10 @@ class InlineEditor(Gtk.Revealer):
             self.view.emit("cut-clipboard")
             return True
 
-        # Tab → accept ghost completion if present, else shell completion
+        # Tab → shell completion
         if keyval == Gdk.KEY_Tab and not state:
-            if self._ghost_text:
-                self._accept_ghost()
-                return True
             self._request_completion()
             return True
-
-        # Right arrow at end of line → accept ghost completion
-        if keyval == Gdk.KEY_Right and not state:
-            insert = self.buffer.get_iter_at_mark(self.buffer.get_insert())
-            user_end = self._get_user_text_end()
-            if insert.compare(user_end) >= 0 and self._ghost_text:
-                self._accept_ghost()
-                return True
 
         # Ctrl+D → match selection and add cursor (EOF only on empty editor without selection)
         if keyval == Gdk.KEY_d and state == Gdk.ModifierType.CONTROL_MASK:
@@ -338,26 +317,19 @@ class InlineEditor(Gtk.Revealer):
             self.column_select(1)
             return True
 
-        # Escape → clear ghost first, then cursors, then dismiss
+        # Escape → clear cursors first, then dismiss
         if keyval == Gdk.KEY_Escape:
-            if self._ghost_text:
-                self._clear_ghost()
-                return True
             if self.cursors:
                 self.clear_cursors()
                 return True
+            self._reset_search()
             self.buffer.set_text("")
             self.dismiss()
             return True
 
-        # Up/Down → cycle through ghost matches, or history navigation
+        # Up/Down on single-line → search history by current input
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and self._is_single_line():
-            if self._ghost_matches:
-                direction = -1 if keyval == Gdk.KEY_Up else 1
-                self._cycle_ghost(direction)
-                return True
-            self._clear_ghost()
-            self._navigate_history(keyval == Gdk.KEY_Up)
+            self._search_history(keyval == Gdk.KEY_Up)
             return True
 
         # Ctrl+Z → terminal undo passthrough
@@ -370,38 +342,76 @@ class InlineEditor(Gtk.Revealer):
     def _is_single_line(self):
         return self.buffer.get_line_count() <= 1
 
-    # ---- History ----
+    # ---- History search ----
 
-    def _navigate_history(self, go_up):
-        if not self._history:
-            return
+    def _reset_search(self):
+        """Reset history search state."""
+        self._search_text = None
+        self._search_matches = []
+        self._search_index = -1
+
+    def _search_history(self, go_up):
+        """Search history by current input. Up = older match, Down = newer / original."""
+        current_text = self.buffer.get_text(
+            self.buffer.get_start_iter(), self.buffer.get_end_iter(), False)
+
+        # First press: save the search text and build matches
+        if self._search_text is None:
+            self._search_text = current_text
+            self._search_matches = self._build_matches(current_text)
+            self._search_index = -1
 
         if go_up:
-            if self._history_index == -1:
-                # Save current input before navigating
-                self._saved_input = self.buffer.get_text(
-                    self.buffer.get_start_iter(), self.buffer.get_end_iter(), False
-                )
-                self._history_index = len(self._history) - 1
-            elif self._history_index > 0:
-                self._history_index -= 1
-            else:
-                return  # At oldest entry
+            # Move to next older match
+            if self._search_index + 1 < len(self._search_matches):
+                self._search_index += 1
+                self.buffer.set_text(self._search_matches[self._search_index])
+                self.buffer.place_cursor(self.buffer.get_end_iter())
         else:
-            if self._history_index == -1:
-                return  # Not in history mode
-            elif self._history_index < len(self._history) - 1:
-                self._history_index += 1
-            else:
-                # Back to saved input
-                self._history_index = -1
-                self.buffer.set_text(getattr(self, '_saved_input', ''))
-                self.view.grab_focus()
-                return
+            # Move to newer match, or back to original text
+            if self._search_index > 0:
+                self._search_index -= 1
+                self.buffer.set_text(self._search_matches[self._search_index])
+                self.buffer.place_cursor(self.buffer.get_end_iter())
+            elif self._search_index == 0:
+                # Back to original text
+                self._search_index = -1
+                self.buffer.set_text(self._search_text or "")
+                self.buffer.place_cursor(self.buffer.get_end_iter())
+            # else: already at original text, do nothing
 
-        self.buffer.set_text(self._history[self._history_index])
-        # Place cursor at end
-        self.buffer.place_cursor(self.buffer.get_end_iter())
+    def _build_matches(self, query):
+        """Build a list of history entries matching query.
+        Prefix matches first, then substring. Most recent first.
+        If query is empty, returns all history (plain chronological nav)."""
+        all_history = list(self._history) + list(self._shell_history)
+
+        if not query:
+            # No search text — plain chronological history (most recent first)
+            seen = set()
+            result = []
+            for entry in reversed(all_history):
+                if entry not in seen:
+                    seen.add(entry)
+                    result.append(entry)
+            return result
+
+        query_lower = query.lower()
+        prefix_matches = []
+        contains_matches = []
+        seen = set()
+
+        for entry in reversed(all_history):
+            if entry in seen or entry == query:
+                continue
+            seen.add(entry)
+            entry_lower = entry.lower()
+            if entry_lower.startswith(query_lower):
+                prefix_matches.append(entry)
+            elif query_lower in entry_lower:
+                contains_matches.append(entry)
+
+        return prefix_matches + contains_matches
 
     # ---- Tab completion ----
 
@@ -409,8 +419,8 @@ class InlineEditor(Gtk.Revealer):
         """Send the current partial input + Tab to the terminal for
         shell completion. The completion result will appear in the
         terminal output (we can't easily capture it back yet)."""
-        text = self._get_user_text()
-        self._clear_ghost()
+        text = self.buffer.get_text(
+            self.buffer.get_start_iter(), self.buffer.get_end_iter(), False)
         # Clear the terminal's current input line, type our text, and press Tab
         self.terminal.feed_child("\x15")  # Ctrl+U: kill line
         self.terminal.feed_child(text)
@@ -422,15 +432,24 @@ class InlineEditor(Gtk.Revealer):
     # ---- Auto-resize ----
 
     def _on_buffer_changed(self, buffer):
-        """Auto-resize the editor height and update ghost completion."""
+        """Auto-resize the editor height. Reset search state when user edits text."""
         line_count = buffer.get_line_count()
         visible_lines = min(line_count, MAX_VISIBLE_LINES)
         target_height = max(MIN_HEIGHT, visible_lines * 20)
         self.scroll.set_min_content_height(target_height)
 
-        # Update ghost text completion (skip if we're inserting ghost text)
-        if not self._inhibit_ghost:
-            GLib.idle_add(self._update_ghost)
+        # Reset search when user types new text (not when we set text programmatically)
+        if self._search_text is not None:
+            current = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            # If text changed to something other than a known match, reset search
+            if (self._search_index >= 0 and
+                    self._search_index < len(self._search_matches) and
+                    current == self._search_matches[self._search_index]):
+                pass  # Text was set by search navigation, don't reset
+            elif current == (self._search_text or ""):
+                pass  # Text is back to original search text
+            else:
+                self._reset_search()
 
     # ---- Shell history loading ----
 
@@ -506,154 +525,6 @@ class InlineEditor(Gtk.Revealer):
             log.debug("Error parsing history file %s: %s", path, e)
         return entries
 
-    # ---- Ghost text completion (Fish-style) ----
-
-    def _get_user_text(self):
-        """Get only the user-typed text (excluding ghost suggestion)."""
-        if self._ghost_search_text is not None:
-            return self._ghost_search_text
-        start = self.buffer.get_start_iter()
-        end = self.buffer.get_end_iter()
-        full = self.buffer.get_text(start, end, False)
-        if self._ghost_text and full.endswith(self._ghost_text):
-            return full[:-len(self._ghost_text)]
-        return full
-
-    def _get_user_text_end(self):
-        """Get the iter position where user text ends (before ghost)."""
-        if self._ghost_text:
-            end = self.buffer.get_end_iter()
-            end.backward_chars(len(self._ghost_text))
-            return end
-        return self.buffer.get_end_iter()
-
-    def _clear_ghost(self):
-        """Remove ghost text and reset all ghost match state."""
-        self._clear_ghost_display()
-        self._ghost_matches = []
-        self._ghost_match_index = -1
-        self._ghost_search_text = None
-
-    def _clear_ghost_display(self):
-        """Remove ghost text from the buffer (keeps match list for cycling)."""
-        if self._ghost_text:
-            self._inhibit_ghost = True
-            user_end = self._get_user_text_end()
-            buf_end = self.buffer.get_end_iter()
-            self.buffer.delete(user_end, buf_end)
-            self._ghost_text = None
-            self._inhibit_ghost = False
-
-    def _build_matches(self, query):
-        """Build a list of matching history entries: prefix matches first,
-        then substring matches. Most recent entries come first in each group."""
-        if len(query) < 2:
-            return []
-
-        query_lower = query.lower()
-        prefix_matches = []
-        contains_matches = []
-
-        # Search session history first, then shell history
-        all_history = list(self._history) + list(self._shell_history)
-
-        seen = set()
-        for entry in reversed(all_history):
-            if entry in seen or entry == query:
-                continue
-            seen.add(entry)
-            entry_lower = entry.lower()
-            if entry_lower.startswith(query_lower):
-                prefix_matches.append(entry)
-            elif query_lower in entry_lower:
-                contains_matches.append(entry)
-
-        return prefix_matches + contains_matches
-
-    def _update_ghost(self):
-        """Find matching history entries and show the best one as ghost text."""
-        if not self._active:
-            return False
-
-        # Get user text without existing ghost
-        user_text = self._get_user_text()
-
-        # Clear old ghost display
-        self._clear_ghost_display()
-
-        # Don't suggest during old-style history navigation
-        if self._history_index != -1:
-            return False
-
-        # Build matches
-        matches = self._build_matches(user_text)
-        if not matches:
-            self._ghost_matches = []
-            self._ghost_match_index = -1
-            self._ghost_search_text = None
-            return False
-
-        self._ghost_matches = matches
-        self._ghost_match_index = 0
-        self._ghost_search_text = user_text
-        self._show_ghost_match(user_text, matches[0])
-
-        return False  # one-shot idle
-
-    def _show_ghost_match(self, user_text, match):
-        """Display a matched command as ghost text in the buffer."""
-        self._inhibit_ghost = True
-        match_lower = match.lower()
-        user_lower = user_text.lower()
-
-        if match_lower.startswith(user_lower):
-            # Prefix match — show just the suffix
-            suffix = match[len(user_text):]
-        else:
-            # Substring match — show " → full_command"
-            suffix = "  →  " + match
-
-        end = self.buffer.get_end_iter()
-        self.buffer.insert(end, suffix)
-        ghost_start = self.buffer.get_end_iter()
-        ghost_start.backward_chars(len(suffix))
-        ghost_end = self.buffer.get_end_iter()
-        self.buffer.apply_tag(self._ghost_tag, ghost_start, ghost_end)
-        self.buffer.place_cursor(ghost_start)
-        self._ghost_text = suffix
-        self._inhibit_ghost = False
-
-    def _cycle_ghost(self, direction):
-        """Cycle through ghost matches. direction: 1=next(down), -1=prev(up)."""
-        if not self._ghost_matches:
-            return False
-
-        new_index = self._ghost_match_index + direction
-        if new_index < 0 or new_index >= len(self._ghost_matches):
-            return False
-
-        self._ghost_match_index = new_index
-        user_text = self._ghost_search_text
-
-        # Clear current ghost display and show the new match
-        self._clear_ghost_display()
-        self._show_ghost_match(user_text, self._ghost_matches[new_index])
-        return True
-
-    def _accept_ghost(self):
-        """Accept the ghost suggestion — replace buffer with full matched command."""
-        if not self._ghost_matches or self._ghost_match_index < 0:
-            return
-        matched = self._ghost_matches[self._ghost_match_index]
-        self._ghost_text = None
-        self._ghost_matches = []
-        self._ghost_match_index = -1
-        self._ghost_search_text = None
-        self._inhibit_ghost = True
-        self.buffer.set_text(matched)
-        self.buffer.place_cursor(self.buffer.get_end_iter())
-        self._inhibit_ghost = False
-
     # ---- Public API ----
 
     def set_text(self, text):
@@ -662,8 +533,12 @@ class InlineEditor(Gtk.Revealer):
         self.buffer.place_cursor(self.buffer.get_end_iter())
 
     def get_text(self):
-        """Get the current editor content (excluding ghost suggestion)."""
-        return self._get_user_text()
+        """Get the current editor content."""
+        return self.buffer.get_text(
+            self.buffer.get_start_iter(),
+            self.buffer.get_end_iter(),
+            False,
+        )
 
     # ---- Ctrl+Click ----
 
