@@ -1358,7 +1358,8 @@ class Guake(SimpleGladeApp):
 
             # Now, make only the pages for this workspace visible
             for page in pages_in_ws_ordered:
-                page.show()
+                page.set_no_show_all(False)
+                page.show_all()
 
             # Determine which page to focus
             page_to_focus = None

@@ -639,6 +639,12 @@ class TerminalNotebook(Gtk.Notebook):
                 self.terminal_attached(terminal)
             self.hide_tabbar_if_one_tab()
             self.update_all_tabs_activity()
+        else:
+            # Hide the page so its tab doesn't appear in the tab bar
+            # and doesn't cause the window to resize/re-animate.
+            # switch_to_workspace will show it later.
+            root_terminal_box.set_no_show_all(True)
+            root_terminal_box.hide()
 
         if self.guake:
             root_terminal_box.connect_after("draw", self.guake.background_image_manager.draw)
