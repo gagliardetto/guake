@@ -1187,9 +1187,9 @@ class Guake(SimpleGladeApp):
             for _ in range(nb.get_n_pages()):
                 nb.delete_page(0)
 
-            # Restore active workspace tabs
+            # Restore active workspace tabs (visible, focused)
             for nb_key, tab in active_tabs:
-                self._restore_single_tab(nb_key, tab)
+                self._restore_single_tab(nb_key, tab, background=False)
 
         except (KeyError, IndexError, TypeError) as e:
             log.warning("Failed to restore active workspace tabs: %s", e, exc_info=True)
@@ -1233,20 +1233,29 @@ class Guake(SimpleGladeApp):
         if self.settings.general.get_boolean("restore-tabs-notify") and not suppress_notify:
             notifier.showMessage("Guake Terminal", "Your tabs have been restored!", pixmapfile("guake-notification.png"))
 
-    def _restore_single_tab(self, nb_key, tab):
-        """Restore a single tab from session data."""
+    def _restore_single_tab(self, nb_key, tab, background=False):
+        """Restore a single tab from session data.
+        If background=True, don't focus or switch to the new page."""
         nb = self.notebook_manager.get_notebook(nb_key)
         if tab.get("panes"):
-            box, _, _ = nb.new_page_with_focus(
-                label=tab["label"],
-                user_set=tab.get("custom_label_set", False),
-                empty=True)
+            box, page_num, terminal = nb.new_page(empty=True)
+            nb.rename_page(page_num, tab.get("label", "Terminal"), tab.get("custom_label_set", False))
             box.restore_box_layout(box.child, tab["panes"])
         else:
-            nb.new_page_with_focus(
-                tab.get("directory"),
-                tab.get("label"),
-                tab.get("custom_label_set", False))
+            box, page_num, terminal = nb.new_page(tab.get("directory"))
+            nb.rename_page(page_num, tab.get("label", "Terminal"), tab.get("custom_label_set", False))
+
+        if background:
+            # Hide the page immediately — switch_to_workspace will show it later
+            page = nb.get_nth_page(page_num)
+            if page:
+                page.hide()
+        else:
+            nb.set_current_page(page_num)
+            if terminal:
+                terminal.grab_focus()
+
+        return box, page_num, terminal
 
     def _restore_next_background_tab(self):
         """Restore one tab in the background per idle cycle."""
@@ -1267,7 +1276,7 @@ class Guake(SimpleGladeApp):
         try:
             was_restoring = self.is_restoring_session
             self.is_restoring_session = True
-            self._restore_single_tab(nb_key, tab)
+            self._restore_single_tab(nb_key, tab, background=True)
             self.is_restoring_session = was_restoring
         except Exception as e:
             log.warning("Failed to restore background tab: %s", e)
