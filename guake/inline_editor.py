@@ -524,14 +524,18 @@ class InlineEditor(Gtk.Revealer):
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 if shell_type == "zsh":
-                    # Zsh multiline: lines ending with \ are continued
+                    # Zsh multiline: lines ending with \ are continued.
+                    # The trailing \ is a history format marker, not part
+                    # of the actual command — strip it when reconstructing.
                     current = None
                     for line in f:
                         line = line.rstrip("\n")
                         if current is not None:
-                            # Continuation of a multiline command
-                            current += "\n" + line
-                            if not line.endswith("\\"):
+                            # Continuation line
+                            if line.endswith("\\"):
+                                current += "\n" + line[:-1]
+                            else:
+                                current += "\n" + line
                                 entries.append(current)
                                 current = None
                             continue
@@ -547,11 +551,10 @@ class InlineEditor(Gtk.Revealer):
                             cmd = stripped
 
                         if cmd.endswith("\\"):
-                            current = cmd  # start multiline
+                            current = cmd[:-1]  # strip the \ marker
                         else:
                             entries.append(cmd)
 
-                    # Flush any unterminated multiline command
                     if current is not None:
                         entries.append(current)
 
