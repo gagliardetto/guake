@@ -1216,6 +1216,7 @@ class Guake(SimpleGladeApp):
 
         # 5. Mark non-active workspaces as loading and queue background restore
         if other_tabs:
+            self._pending_restore_tabs = other_tabs  # blocks saves until done
             self._pending_session_uuids = all_session_uuids
 
             # Mark loading workspaces in sidebar
@@ -1226,9 +1227,9 @@ class Guake(SimpleGladeApp):
             if hasattr(self.workspace_manager, 'set_loading_workspaces'):
                 self.workspace_manager.set_loading_workspaces(loading_ws_ids)
 
-            # Restore all background tabs in one batch via idle_add
-            # to avoid per-tab window resize/animation
-            GLib.idle_add(self._restore_all_background_tabs, other_tabs)
+            # Delay background restore until the window has fully settled
+            # (avoids triggering the dropdown animation during tab creation)
+            GLib.timeout_add(1500, self._restore_all_background_tabs, other_tabs)
         else:
             # All tabs restored, reconcile
             if self.workspace_manager:
@@ -1259,14 +1260,15 @@ class Guake(SimpleGladeApp):
         return box, page_num, terminal
 
     def _restore_all_background_tabs(self, tabs):
-        """Restore all background tabs in one batch with the notebook frozen
-        to prevent per-tab window resize/animation."""
+        """Restore all background tabs in one batch with the window frozen
+        to prevent resize events triggering the dropdown animation."""
         notebook = self.get_notebook()
         was_restoring = self.is_restoring_session
         self.is_restoring_session = True
 
         try:
-            # Freeze to prevent resize events propagating per-tab
+            # Freeze everything to prevent per-tab resize propagation
+            self.window.freeze_child_notify()
             notebook.freeze_child_notify()
 
             for nb_key, tab in tabs:
@@ -1276,6 +1278,7 @@ class Guake(SimpleGladeApp):
                     log.warning("Failed to restore background tab: %s", e)
 
             notebook.thaw_child_notify()
+            self.window.thaw_child_notify()
         finally:
             self.is_restoring_session = was_restoring
 
