@@ -547,7 +547,15 @@ class WorkspaceManager:
             active_ws = target_ws
 
         if active_ws:
-            active_ws.setdefault("terminals", []).append(terminal_uuid)
+            terminals = active_ws.setdefault("terminals", [])
+            active_terminal = active_ws.get("active_terminal")
+            # Insert after the currently active terminal so the workspace order
+            # matches the notebook's visual tab order (new-tab-after behavior).
+            if active_terminal and active_terminal in terminals:
+                idx = terminals.index(active_terminal)
+                terminals.insert(idx + 1, terminal_uuid)
+            else:
+                terminals.append(terminal_uuid)
             active_ws["active_terminal"] = terminal_uuid
             self.save_workspaces()
             self._build_workspace_list()
