@@ -181,7 +181,6 @@ class Guake(SimpleGladeApp):
 
         self.hidden = True
         self.forceHide = False
-        self.mouse_in_hot_edge = False
         self.is_restoring_session = False
         self.adding_tab_to_workspace_id = None
         self.sidebar_last_opened_time = 0.0
@@ -857,31 +856,39 @@ class Guake(SimpleGladeApp):
         return True
 
     def on_window_motion(self, widget, event):
+        hot_edge_width = 5  # px — wide enough to reliably trigger
         sidebar_width = self.sidebar_revealer.get_allocated_width()
-        hot_edge_width = 1
+        is_revealed = self.sidebar_revealer.get_reveal_child()
+
         if event.x < hot_edge_width:
-            if not self.mouse_in_hot_edge:
-                self.mouse_in_hot_edge = True
-                if self.sidebar_hide_timer:
-                    GLib.source_remove(self.sidebar_hide_timer)
-                    self.sidebar_hide_timer = None
-                if not self.sidebar_revealer.get_reveal_child():
-                    self.sidebar_revealer.set_reveal_child(True)
-                    self.sidebar_last_opened_time = pytime.time()
-        elif event.x > sidebar_width + hot_edge_width:
-            self.mouse_in_hot_edge = False
-            if self.sidebar_revealer.get_reveal_child() and not self.sidebar_hide_timer:
+            # Zone: HOT EDGE — reveal sidebar, cancel any pending hide
+            self._cancel_sidebar_hide_timer()
+            if not is_revealed:
+                self.sidebar_revealer.set_reveal_child(True)
+                self.sidebar_last_opened_time = pytime.time()
+
+        elif is_revealed and event.x <= sidebar_width:
+            # Zone: ON SIDEBAR — cancel any pending hide (user is interacting)
+            self._cancel_sidebar_hide_timer()
+
+        else:
+            # Zone: MAIN AREA — schedule hide if sidebar is visible
+            if is_revealed and not self.sidebar_hide_timer:
                 time_since_open = pytime.time() - self.sidebar_last_opened_time
-                wait_for_min_open_time = max(0, 1.0 - time_since_open)
-                wait_from_now = max(0.3, wait_for_min_open_time)
-                self.sidebar_hide_timer = GLib.timeout_add(int(wait_from_now * 1000), self.hide_sidebar_timeout)
-        elif event.x > hot_edge_width:
-            self.mouse_in_hot_edge = False
+                wait_for_min_open_time = max(0, 0.6 - time_since_open)
+                delay = max(0.25, wait_for_min_open_time)
+                self.sidebar_hide_timer = GLib.timeout_add(
+                    int(delay * 1000), self.hide_sidebar_timeout
+                )
+
+    def _cancel_sidebar_hide_timer(self):
+        if self.sidebar_hide_timer:
+            GLib.source_remove(self.sidebar_hide_timer)
+            self.sidebar_hide_timer = None
 
     def hide_sidebar_timeout(self):
-        if not self.mouse_in_hot_edge:
-            self.sidebar_revealer.set_reveal_child(False)
         self.sidebar_hide_timer = None
+        self.sidebar_revealer.set_reveal_child(False)
         return False
 
     def fullscreen(self):
