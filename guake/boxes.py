@@ -327,6 +327,19 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         """Initialize block model, overlay, and inline editor for this terminal.
         Called once when the first terminal gets focus."""
         self._blocks_initialized = True
+        self._input_phase = False   # True when shell is at a prompt
+
+        # Load inline editor config
+        self._editor_mode = "hover"  # default: "hover", "always", "disabled"
+        try:
+            config_path = self.guake.get_xdg_config_directory() / "inline_editor.json"
+            if config_path.exists():
+                import json
+                cfg = json.loads(config_path.read_text())
+                self._editor_mode = cfg.get("mode", "hover")
+        except Exception:
+            pass
+
         try:
             from guake.blocks import BlockModel, BlockOverlay, BlockFIFOReader
             from guake.inline_editor import InlineEditor
@@ -334,14 +347,19 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             self.block_model = BlockModel(terminal)
 
             # Block overlay — draws directly on the terminal's draw signal
-            # (no separate widget = no event interception)
             self.block_overlay = BlockOverlay(terminal, self.block_model)
 
-            # Inline editor (docked at bottom of the box — below terminal, no overlap)
-            self.inline_editor = InlineEditor(terminal, self.block_model)
-            self.pack_end(self.inline_editor, False, False, 0)
-            self.inline_editor.show_all()
-            # Don't reveal yet — wait for prompt_start event
+            # Inline editor (docked at bottom, hidden by default)
+            if self._editor_mode != "disabled":
+                self.inline_editor = InlineEditor(terminal, self.block_model)
+                self.pack_end(self.inline_editor, False, False, 0)
+                self.inline_editor.show_all()
+
+            # Bottom-edge hover detection for "hover" mode
+            if self._editor_mode == "hover":
+                terminal.add_events(Gdk.EventMask.POINTER_MOTION_MASK)
+                terminal.connect("motion-notify-event", self._on_terminal_motion)
+                self._editor_hide_timer = None
 
             # FIFO reader for shell integration events
             fifo_path = getattr(terminal, 'block_fifo_path', None)
@@ -351,22 +369,53 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                 )
                 self._block_fifo_reader.start()
 
-            log.info("Block support initialized for terminal %s", terminal.uuid)
+            log.info("Block support initialized for terminal %s (mode=%s)", terminal.uuid, self._editor_mode)
         except Exception as e:
             log.warning("Could not initialize block support: %s", e)
+
+    def _on_terminal_motion(self, terminal, event):
+        """Detect mouse at bottom edge of terminal to reveal inline editor."""
+        if not self._input_phase or not self.inline_editor:
+            return False
+
+        alloc = terminal.get_allocation()
+        edge_height = 8  # pixels from bottom edge
+
+        if event.y >= alloc.height - edge_height:
+            # Mouse at bottom edge — show editor
+            if self._editor_hide_timer:
+                GLib.source_remove(self._editor_hide_timer)
+                self._editor_hide_timer = None
+            if not self.inline_editor.is_active:
+                self.inline_editor.activate()
+        else:
+            # Mouse away from bottom — schedule hide (unless editor has focus)
+            if self.inline_editor.is_active and not self.inline_editor.view.has_focus():
+                if not self._editor_hide_timer:
+                    self._editor_hide_timer = GLib.timeout_add(
+                        400, self._hide_editor_timeout)
+        return False
+
+    def _hide_editor_timeout(self):
+        self._editor_hide_timer = None
+        if self.inline_editor and self.inline_editor.is_active:
+            if not self.inline_editor.view.has_focus():
+                self.inline_editor.deactivate()
+        return False
 
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
         if event_type == "prompt_start":
-            # prompt_start is a reliable signal: the shell's precmd hook
-            # fired, meaning we're back at a normal prompt. No need for
-            # alt-screen heuristics — if we got this event, the shell is ready.
+            self._input_phase = True
             if self.inline_editor:
-                self.inline_editor.activate()
+                self.inline_editor.reset_dismissed()
+                if self._editor_mode == "always":
+                    self.inline_editor.activate()
             if self.block_overlay:
                 self.block_overlay.refresh()
 
         elif event_type == "command_start":
+            self._input_phase = False
             if self.inline_editor:
                 self.inline_editor.deactivate()
             if self.block_overlay:

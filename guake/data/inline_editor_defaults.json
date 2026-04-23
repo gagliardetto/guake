@@ -1,0 +1,5 @@
+{
+    "mode": "hover",
+    "_mode_options": ["hover", "always", "disabled"],
+    "_description": "hover: editor appears when mouse reaches bottom edge during input phase. always: editor appears automatically at every prompt. disabled: no inline editor."
+}

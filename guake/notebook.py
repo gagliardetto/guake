@@ -48,6 +48,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Wnck", "3.0")
 from gi.repository import GObject
 from gi.repository import Gdk
+from gi.repository import GLib
 from gi.repository import Gtk
 from gi.repository import Wnck
 from guake.terminal import GuakeTerminal
@@ -334,6 +335,18 @@ class TerminalNotebook(Gtk.Notebook):
 
     def on_switch_page(self, notebook, page, page_num):
         self.update_all_tabs_activity()
+        # Ensure focus goes to the VTE terminal, not the inline editor
+        GLib.idle_add(self._focus_terminal_on_page, page)
+
+    def _focus_terminal_on_page(self, page):
+        """Focus the VTE terminal on the given page."""
+        try:
+            terminals = list(page.iter_terminals())
+            if terminals:
+                terminals[0].grab_focus()
+        except Exception:
+            pass
+        return False
 
     def update_all_tabs_activity(self):
         """

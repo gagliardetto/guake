@@ -39,6 +39,7 @@ class InlineEditor(Gtk.Revealer):
         self.terminal = terminal
         self.block_model = block_model
         self._active = False
+        self._user_dismissed = False
         self._history_index = -1
         self._history = []
 
@@ -151,7 +152,7 @@ class InlineEditor(Gtk.Revealer):
 
     def activate(self):
         """Show the editor (shell is waiting for input)."""
-        if self._active:
+        if self._active or self._user_dismissed:
             return
         self._active = True
         self.clear_cursors()
@@ -166,8 +167,17 @@ class InlineEditor(Gtk.Revealer):
         self._active = False
         self.clear_cursors()
         self.set_reveal_child(False)
-        # Return focus to the terminal so Ctrl+C, scrolling, etc. work
         self.terminal.grab_focus()
+
+    def dismiss(self):
+        """User explicitly dismissed the editor (Escape).
+        Won't reappear until next prompt_start resets the flag."""
+        self._user_dismissed = True
+        self.deactivate()
+
+    def reset_dismissed(self):
+        """Called on prompt_start to allow hover-trigger again."""
+        self._user_dismissed = False
 
     def _grab_focus(self):
         if self._active:
@@ -290,14 +300,13 @@ class InlineEditor(Gtk.Revealer):
             self.column_select(1)
             return True
 
-        # Escape → clear cursors first, then clear editor
+        # Escape → clear cursors first, then dismiss editor
         if keyval == Gdk.KEY_Escape:
             if self.cursors:
                 self.clear_cursors()
                 return True
             self.buffer.set_text("")
-            self.deactivate()
-            self.terminal.grab_focus()
+            self.dismiss()
             return True
 
         # Up/Down on single-line → history navigation
