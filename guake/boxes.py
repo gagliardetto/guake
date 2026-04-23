@@ -459,6 +459,12 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         if self._block_fifo_reader:
             self._block_fifo_reader.stop()
             self._block_fifo_reader = None
+        if self.block_overlay:
+            self.block_overlay.cleanup()
+            self.block_overlay = None
+        if self.inline_editor:
+            self.inline_editor.deactivate()
+            self.inline_editor = None
 
     def get_last_terminal_focused(self, terminal):
         return self.last_terminal_focused

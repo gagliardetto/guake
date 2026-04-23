@@ -167,7 +167,12 @@ class InlineEditor(Gtk.Revealer):
         self._active = False
         self.clear_cursors()
         self.set_reveal_child(False)
-        self.terminal.grab_focus()
+        # Return focus to terminal (guard against destroyed widget)
+        try:
+            if self.terminal and self.terminal.get_parent():
+                self.terminal.grab_focus()
+        except Exception:
+            pass
 
     def dismiss(self):
         """User explicitly dismissed the editor (Escape).

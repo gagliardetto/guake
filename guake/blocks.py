@@ -310,10 +310,23 @@ class BlockOverlay:
         self.terminal = terminal
         self.block_model = block_model
         self._draw_handler_id = self.terminal.connect_after("draw", self._on_draw)
+        self._adj_handler_id = None
 
         # Redraw when terminal scrolls
         adj = self.terminal.get_vadjustment()
-        adj.connect("value-changed", lambda a: self.terminal.queue_draw())
+        if adj:
+            self._adj_handler_id = adj.connect("value-changed", lambda a: self.terminal.queue_draw())
+
+    def cleanup(self):
+        """Disconnect signal handlers to prevent leaks on terminal destruction."""
+        if self._draw_handler_id and self.terminal.handler_is_connected(self._draw_handler_id):
+            self.terminal.disconnect(self._draw_handler_id)
+            self._draw_handler_id = None
+        if self._adj_handler_id:
+            adj = self.terminal.get_vadjustment()
+            if adj and adj.handler_is_connected(self._adj_handler_id):
+                adj.disconnect(self._adj_handler_id)
+            self._adj_handler_id = None
 
     def _get_char_metrics(self):
         """Get the terminal's character cell size in pixels."""
