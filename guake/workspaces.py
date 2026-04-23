@@ -57,6 +57,8 @@ class WorkspaceManager:
         self._git_status_cache = {}
         self._refresh_timer_id = None
         self._is_refreshing_git = False
+        self._save_timer_id = None
+        self._rebuild_sidebar_id = None
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
@@ -71,7 +73,7 @@ class WorkspaceManager:
 
         self._load_data()
         self._build_header()
-        self._build_workspace_list()
+        self._do_build_workspace_list()  # synchronous during init
         self._start_refresh_timer()
 
     def _load_data(self):
@@ -133,15 +135,30 @@ class WorkspaceManager:
         self._build_workspace_list()
 
     def save_workspaces(self):
-        """Saves current workspace data to workspaces.json."""
+        """Schedules a save of workspace data. Rapid calls are coalesced
+        into a single disk write after a 1-second quiet period."""
+        if self._save_timer_id is not None:
+            GLib.source_remove(self._save_timer_id)
+        self._save_timer_id = GLib.timeout_add(1000, self._save_workspaces_now)
+
+    def _save_workspaces_now(self):
+        """Immediately writes workspace data to disk."""
+        self._save_timer_id = None
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             data_to_save = self.workspaces_data.copy()
             with self.config_path.open("w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, indent=2)
-            log.info("Workspaces saved to %s", self.config_path)
+            log.debug("Workspaces saved to %s", self.config_path)
         except IOError as e:
             log.error("Failed to save workspaces file: %s", e)
+        return False  # one-shot timer
+
+    def flush_saves(self):
+        """Force any pending saves to disk immediately (call before quit)."""
+        if self._save_timer_id is not None:
+            GLib.source_remove(self._save_timer_id)
+            self._save_workspaces_now()
 
     def reconcile_orphan_tabs(self, all_session_uuids=None):
         """
@@ -255,10 +272,17 @@ class WorkspaceManager:
         self.widget.pack_start(Gtk.Separator(), False, False, 0)
 
     def _build_workspace_list(self):
+        """Schedule a sidebar rebuild. Multiple calls within the same event
+        loop cycle are coalesced into one rebuild."""
+        if self._rebuild_sidebar_id is None:
+            self._rebuild_sidebar_id = GLib.idle_add(self._do_build_workspace_list)
+
+    def _do_build_workspace_list(self):
         """
-        Builds the listbox that will contain the workspaces from the loaded data,
-        separating pinned workspaces and enabling drag-and-drop.
+        Actually builds the listbox with workspace rows.
+        Separates pinned workspaces and enables drag-and-drop.
         """
+        self._rebuild_sidebar_id = None
         if hasattr(self, "scrolled_window"):
             self.widget.remove(self.scrolled_window)
             self.scrolled_window.destroy()

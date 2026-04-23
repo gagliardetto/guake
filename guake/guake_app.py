@@ -625,8 +625,8 @@ class Guake(SimpleGladeApp):
         self.window.get_window().focus(time)
         self.window.set_type_hint(Gdk.WindowTypeHint.DOCK)
         self.window.set_type_hint(Gdk.WindowTypeHint.NORMAL)
-        self.settings.styleFont.triggerOnChangedValue(self.settings.styleFont, "color")
-        self.settings.styleBackground.triggerOnChangedValue(self.settings.styleBackground, "color")
+        # Re-apply colors only to the current page (not all hundreds of terminals)
+        self.set_colors_from_settings_on_page()
         self.restore_pending_terminal_split()
         self.execute_hook("show")
 
@@ -681,8 +681,10 @@ class Guake(SimpleGladeApp):
         prompt_tab_cfg = self.settings.general.get_int("prompt-on-close-tab")
         if prompt_cfg or (prompt_tab_cfg == PROMPT_PROCESSES and procs) or (prompt_tab_cfg == PROMPT_ALWAYS):
             if PromptQuitDialog(self.window, procs, tabs, notebooks).quit():
+                self.flush_saves()
                 Gtk.main_quit()
         else:
+            self.flush_saves()
             Gtk.main_quit()
 
     def accel_reset_terminal(self, *args):
@@ -1035,6 +1037,17 @@ class Guake(SimpleGladeApp):
         return Path(os.environ.get("XDG_CONFIG_HOME", "~/.config"), "guake").expanduser()
 
     def save_tabs(self, filename="session.json"):
+        """Schedules a save of tab session data. Rapid calls are coalesced
+        into a single disk write after a 1-second quiet period."""
+        if not hasattr(self, '_save_tabs_timer_id'):
+            self._save_tabs_timer_id = None
+        if self._save_tabs_timer_id is not None:
+            GLib.source_remove(self._save_tabs_timer_id)
+        self._save_tabs_timer_id = GLib.timeout_add(1000, self._save_tabs_now, filename)
+
+    def _save_tabs_now(self, filename="session.json"):
+        """Immediately writes tab session data to disk."""
+        self._save_tabs_timer_id = None
         config = {"schema_version": TABS_SESSION_SCHEMA_VERSION, "timestamp": int(pytime.time()), "workspace": {}}
         for key, nb in self.notebook_manager.get_notebooks().items():
             tabs = []
@@ -1049,6 +1062,15 @@ class Guake(SimpleGladeApp):
         config_dir = self.get_xdg_config_directory()
         config_dir.mkdir(parents=True, exist_ok=True)
         (config_dir / filename).write_text(json.dumps(config, ensure_ascii=False, indent=4), encoding="utf-8")
+        return False  # one-shot timer
+
+    def flush_saves(self):
+        """Force any pending saves to disk immediately (call before quit)."""
+        if hasattr(self, '_save_tabs_timer_id') and self._save_tabs_timer_id is not None:
+            GLib.source_remove(self._save_tabs_timer_id)
+            self._save_tabs_now()
+        if self.workspace_manager:
+            self.workspace_manager.flush_saves()
 
     def restore_tabs(self, filename="session.json", suppress_notify=False):
         session_file = self.get_xdg_config_directory() / filename
@@ -1165,9 +1187,13 @@ class Guake(SimpleGladeApp):
                 if terms:
                     page_map[str(terms[0].uuid)] = p
 
-            # Hide all pages first to avoid visual glitches
+            # Hide all pages and stop their activity timers to avoid
+            # hundreds of useless poll callbacks from hidden workspaces
             for page in all_pages:
                 page.hide()
+                tab_label = notebook.get_tab_label(page)
+                if hasattr(tab_label, 'set_activity'):
+                    tab_label.set_activity(False)
 
             # Get the page widgets for the current workspace, in the correct order
             pages_in_ws_ordered = []
@@ -1293,7 +1319,7 @@ class Guake(SimpleGladeApp):
         notebook = self.get_notebook()
         for page_num in range(notebook.get_n_pages()):
             page = notebook.get_nth_page(page_num)
-            if not page:
+            if not page or not page.get_visible():
                 continue
             
             procs = notebook.get_running_fg_processes_page(page)

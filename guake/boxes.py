@@ -612,6 +612,10 @@ class TerminalBox(Gtk.Box, TerminalHolder):
     def on_terminal_content_changed(self, terminal, minimap):
         """Debounced handler: schedule a minimap refresh instead of reading
         the entire terminal buffer on every character of output."""
+        # Skip refresh entirely for hidden terminals (other workspaces)
+        root_box = self.get_root_box()
+        if root_box and not root_box.get_visible():
+            return
         if self._minimap_refresh_timer_id is None:
             self._minimap_refresh_timer_id = GLib.timeout_add(
                 self.MINIMAP_REFRESH_MS, self._do_minimap_refresh
@@ -622,6 +626,11 @@ class TerminalBox(Gtk.Box, TerminalHolder):
         Runs at most once per MINIMAP_REFRESH_MS."""
         self._minimap_refresh_timer_id = None
         if not self.terminal:
+            return False
+
+        # Skip if page was hidden between schedule and execution
+        root_box = self.get_root_box()
+        if root_box and not root_box.get_visible():
             return False
 
         try:
