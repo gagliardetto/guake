@@ -26,7 +26,7 @@ from guake.editor import Cursor, MarkTag, Casing
 log = logging.getLogger(__name__)
 
 # Maximum visible lines before the editor starts scrolling
-MAX_VISIBLE_LINES = 8
+MAX_VISIBLE_LINES = 15
 # Minimum height in pixels
 MIN_HEIGHT = 28
 
@@ -334,10 +334,11 @@ class InlineEditor(Gtk.Revealer):
             self.dismiss()
             return True
 
-        # Up/Down on single-line → search history by current input
-        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and self._is_single_line():
-            self._search_history(keyval == Gdk.KEY_Up)
-            return True
+        # Up/Down → search history (always when in search mode, or on single-line)
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down):
+            if self._search_text is not None or self._is_single_line():
+                self._search_history(keyval == Gdk.KEY_Up)
+                return True
 
         # Ctrl+Z → terminal undo passthrough
         if keyval == Gdk.KEY_z and (state & Gdk.ModifierType.CONTROL_MASK):
@@ -517,20 +518,46 @@ class InlineEditor(Gtk.Revealer):
         self._shell_history = list(seen.keys())
 
     def _parse_history_file(self, path, shell_type):
-        """Parse a shell history file, handling shell-specific formats."""
+        """Parse a shell history file, handling shell-specific formats
+        including multiline commands."""
         entries = []
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 if shell_type == "zsh":
+                    # Zsh multiline: lines ending with \ are continued
+                    current = None
                     for line in f:
-                        line = line.strip()
-                        if not line:
+                        line = line.rstrip("\n")
+                        if current is not None:
+                            # Continuation of a multiline command
+                            current += "\n" + line
+                            if not line.endswith("\\"):
+                                entries.append(current)
+                                current = None
                             continue
+
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+
                         # Zsh extended history: ": timestamp:0;command"
-                        if line.startswith(": ") and ";" in line:
-                            line = line.split(";", 1)[1]
-                        entries.append(line)
+                        if stripped.startswith(": ") and ";" in stripped:
+                            cmd = stripped.split(";", 1)[1]
+                        else:
+                            cmd = stripped
+
+                        if cmd.endswith("\\"):
+                            current = cmd  # start multiline
+                        else:
+                            entries.append(cmd)
+
+                    # Flush any unterminated multiline command
+                    if current is not None:
+                        entries.append(current)
+
                 elif shell_type == "fish":
+                    # Fish history: "- cmd: command\n  when: timestamp"
+                    # Multiline commands use \n literally in the yaml
                     for line in f:
                         line = line.strip()
                         if line.startswith("- cmd: "):
