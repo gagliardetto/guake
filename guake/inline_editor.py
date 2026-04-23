@@ -50,6 +50,7 @@ class InlineEditor(Gtk.Revealer):
         self._search_text = None   # original text when search started
         self._search_matches = []  # matching commands
         self._search_index = -1    # position in matches (-1 = original text)
+        self._inhibit_change = False  # prevent buffer-changed from resetting search
 
         self.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
         self.set_transition_duration(150)
@@ -334,11 +335,18 @@ class InlineEditor(Gtk.Revealer):
             self.dismiss()
             return True
 
-        # Up/Down → search history (always when in search mode, or on single-line)
-        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down):
-            if self._search_text is not None or self._is_single_line():
-                self._search_history(keyval == Gdk.KEY_Up)
-                return True
+        # Ctrl+Up/Down → always search history (even on multiline content)
+        if keyval == Gdk.KEY_Up and state == Gdk.ModifierType.CONTROL_MASK:
+            self._search_history(go_up=True)
+            return True
+        if keyval == Gdk.KEY_Down and state == Gdk.ModifierType.CONTROL_MASK:
+            self._search_history(go_up=False)
+            return True
+
+        # Plain Up/Down on single-line → search history
+        if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and not state and self._is_single_line():
+            self._search_history(keyval == Gdk.KEY_Up)
+            return True
 
         # Ctrl+Z → terminal undo passthrough
         if keyval == Gdk.KEY_z and (state & Gdk.ModifierType.CONTROL_MASK):
@@ -370,29 +378,27 @@ class InlineEditor(Gtk.Revealer):
             self._search_index = -1
 
         if go_up:
-            # Move to next older match
             if self._search_index + 1 < len(self._search_matches):
                 self._search_index += 1
                 self._set_match_text(self._search_matches[self._search_index])
         else:
-            # Move to newer match, or back to original text
             if self._search_index > 0:
                 self._search_index -= 1
                 self._set_match_text(self._search_matches[self._search_index])
             elif self._search_index == 0:
-                # Back to original text
                 self._search_index = -1
+                self._inhibit_change = True
                 self.buffer.set_text(self._search_text or "")
                 self.buffer.place_cursor(self.buffer.get_end_iter())
-            # else: already at original text, do nothing
+                self._inhibit_change = False
 
     def _set_match_text(self, text):
         """Set the buffer to a matched command and highlight the search substring."""
+        self._inhibit_change = True
         self.buffer.set_text(text)
         self.buffer.place_cursor(self.buffer.get_end_iter())
 
         if self._search_text:
-            # Find the search string (case-insensitive) and highlight it
             text_lower = text.lower()
             query_lower = self._search_text.lower()
             pos = text_lower.find(query_lower)
@@ -400,6 +406,7 @@ class InlineEditor(Gtk.Revealer):
                 start = self.buffer.get_iter_at_offset(pos)
                 end = self.buffer.get_iter_at_offset(pos + len(self._search_text))
                 self.buffer.apply_tag(self._match_tag, start, end)
+        self._inhibit_change = False
 
     def _build_matches(self, query):
         """Build a list of history entries matching query.
@@ -459,18 +466,9 @@ class InlineEditor(Gtk.Revealer):
         target_height = max(MIN_HEIGHT, visible_lines * 20)
         self.scroll.set_min_content_height(target_height)
 
-        # Reset search when user types new text (not when we set text programmatically)
-        if self._search_text is not None:
-            current = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
-            # If text changed to something other than a known match, reset search
-            if (self._search_index >= 0 and
-                    self._search_index < len(self._search_matches) and
-                    current == self._search_matches[self._search_index]):
-                pass  # Text was set by search navigation, don't reset
-            elif current == (self._search_text or ""):
-                pass  # Text is back to original search text
-            else:
-                self._reset_search()
+        # Reset search when user types (not when we set text programmatically)
+        if not self._inhibit_change and self._search_text is not None:
+            self._reset_search()
 
     # ---- Shell history loading ----
 
