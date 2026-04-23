@@ -180,6 +180,7 @@ class InlineEditor(Gtk.Revealer):
         if not self._active:
             return
         self._active = False
+        self._clear_ghost()
         self.clear_cursors()
         self.set_reveal_child(False)
         # Return focus to terminal (guard against destroyed widget)
@@ -267,6 +268,7 @@ class InlineEditor(Gtk.Revealer):
             if self.buffer.get_has_selection():
                 self.view.emit("copy-clipboard")
                 return True
+            self._clear_ghost()
             self.buffer.set_text("")
             self.terminal.feed_child("\x03")
             return True
@@ -331,8 +333,11 @@ class InlineEditor(Gtk.Revealer):
             self.column_select(1)
             return True
 
-        # Escape → clear cursors first, then dismiss editor
+        # Escape → clear ghost first, then cursors, then dismiss
         if keyval == Gdk.KEY_Escape:
+            if self._ghost_text:
+                self._clear_ghost()
+                return True
             if self.cursors:
                 self.clear_cursors()
                 return True
@@ -342,6 +347,7 @@ class InlineEditor(Gtk.Revealer):
 
         # Up/Down on single-line → history navigation
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and self._is_single_line():
+            self._clear_ghost()
             self._navigate_history(keyval == Gdk.KEY_Up)
             return True
 
@@ -576,12 +582,8 @@ class InlineEditor(Gtk.Revealer):
         self.buffer.place_cursor(self.buffer.get_end_iter())
 
     def get_text(self):
-        """Get the current editor content."""
-        return self.buffer.get_text(
-            self.buffer.get_start_iter(),
-            self.buffer.get_end_iter(),
-            False,
-        )
+        """Get the current editor content (excluding ghost suggestion)."""
+        return self._get_user_text()
 
     # ---- Ctrl+Click ----
 
