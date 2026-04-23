@@ -45,6 +45,8 @@ class InlineEditor(Gtk.Revealer):
         self._history = []
         self._shell_history = []  # loaded from history file
         self._shell_history_loaded = False
+        self._history_mtime = 0   # mtime of last loaded history file
+        self._history_path = None # path to the history file
         self._ghost_text = None   # current ghost suggestion (suffix only)
         self._inhibit_ghost = False  # prevent re-entrant ghost updates
 
@@ -166,8 +168,8 @@ class InlineEditor(Gtk.Revealer):
         """Show the editor (shell is waiting for input)."""
         if self._active or self._user_dismissed:
             return
-        if not self._shell_history_loaded:
-            self._load_shell_history()
+        # Reload history if the file has been modified since last load
+        self._maybe_reload_history()
         self._active = True
         self.clear_cursors()
         self._clear_ghost()
@@ -425,6 +427,19 @@ class InlineEditor(Gtk.Revealer):
 
     # ---- Shell history loading ----
 
+    def _maybe_reload_history(self):
+        """Reload history if the file has been modified since last load."""
+        if not self._shell_history_loaded:
+            self._load_shell_history()
+            return
+        if self._history_path:
+            try:
+                mtime = os.path.getmtime(self._history_path)
+                if mtime > self._history_mtime:
+                    self._load_shell_history()
+            except OSError:
+                pass
+
     def _load_shell_history(self):
         """Load command history from the shell's history file."""
         self._shell_history_loaded = True
@@ -442,6 +457,8 @@ class InlineEditor(Gtk.Revealer):
             if os.path.exists(path):
                 try:
                     history_entries = self._parse_history_file(path, shell_type)
+                    self._history_path = path
+                    self._history_mtime = os.path.getmtime(path)
                     log.info("Loaded %d history entries from %s", len(history_entries), path)
                     break
                 except Exception as e:
