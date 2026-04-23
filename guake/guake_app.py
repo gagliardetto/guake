@@ -855,6 +855,33 @@ class Guake(SimpleGladeApp):
         self.fullscreen_manager.toggle()
         return True
 
+    def accel_block_prev(self, *args):
+        """Jump to the previous command block."""
+        nb = self.get_notebook()
+        page = nb.get_nth_page(nb.get_current_page())
+        if page and hasattr(page, 'block_model') and page.block_model:
+            block = page.block_model.get_prev_block()
+            if block:
+                self._scroll_to_row(block.prompt_row)
+        return True
+
+    def accel_block_next(self, *args):
+        """Jump to the next command block."""
+        nb = self.get_notebook()
+        page = nb.get_nth_page(nb.get_current_page())
+        if page and hasattr(page, 'block_model') and page.block_model:
+            block = page.block_model.get_next_block()
+            if block:
+                self._scroll_to_row(block.prompt_row)
+        return True
+
+    def _scroll_to_row(self, absolute_row):
+        """Scroll the active terminal to a specific row."""
+        terminal = self.get_notebook().get_current_terminal()
+        if terminal:
+            adj = terminal.get_vadjustment()
+            adj.set_value(max(0, absolute_row - 2))  # 2 rows padding above
+
     def on_window_motion(self, widget, event):
         hot_edge_width = 5  # px — wide enough to reliably trigger
         sidebar_width = self.sidebar_revealer.get_allocated_width()

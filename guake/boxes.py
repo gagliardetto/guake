@@ -74,6 +74,13 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         self.child = None
         self.last_terminal_focused = None
 
+        # Block support (initialized lazily on first terminal focus)
+        self.block_model = None
+        self.block_overlay = None
+        self.inline_editor = None
+        self._block_fifo_reader = None
+        self._blocks_initialized = False
+
         self.searchstring = None
         self.searchre = None
         self._add_search_box()
@@ -286,6 +293,72 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
     def set_last_terminal_focused(self, terminal):
         self.last_terminal_focused = terminal
         self.get_notebook().set_last_terminal_focused(terminal)
+        if not self._blocks_initialized and terminal:
+            self._setup_blocks(terminal)
+
+    def _setup_blocks(self, terminal):
+        """Initialize block model, overlay, and inline editor for this terminal.
+        Called once when the first terminal gets focus."""
+        self._blocks_initialized = True
+        try:
+            from guake.blocks import BlockModel, BlockOverlay, BlockFIFOReader
+            from guake.inline_editor import InlineEditor
+
+            self.block_model = BlockModel(terminal)
+
+            # Block overlay (transparent drawing layer)
+            self.block_overlay = BlockOverlay(terminal, self.block_model)
+            self.add_overlay(self.block_overlay)
+            self.set_overlay_pass_through(self.block_overlay, True)
+            self.block_overlay.show()
+
+            # Inline editor (docked at bottom)
+            self.inline_editor = InlineEditor(terminal, self.block_model)
+            self.add_overlay(self.inline_editor)
+            self.inline_editor.show_all()
+            # Don't reveal yet — wait for prompt_start event
+
+            # FIFO reader for shell integration events
+            fifo_path = getattr(terminal, 'block_fifo_path', None)
+            if fifo_path:
+                self._block_fifo_reader = BlockFIFOReader(
+                    fifo_path, self.block_model, self._on_block_event
+                )
+                self._block_fifo_reader.start()
+
+            log.info("Block support initialized for terminal %s", terminal.uuid)
+        except Exception as e:
+            log.warning("Could not initialize block support: %s", e)
+
+    def _on_block_event(self, event_type):
+        """Handle block events from the shell integration FIFO."""
+        if event_type == "prompt_start":
+            if self.inline_editor:
+                # Check for alternate screen (full-screen apps)
+                # VTE doesn't expose this directly in all versions, so we use
+                # a heuristic: if scrollback is 0, we're likely in alt screen
+                adj = self.last_terminal_focused.get_vadjustment() if self.last_terminal_focused else None
+                in_alt_screen = adj and adj.get_upper() <= adj.get_page_size() + 1
+                if not in_alt_screen:
+                    self.inline_editor.activate()
+            if self.block_overlay:
+                self.block_overlay.refresh()
+
+        elif event_type == "command_start":
+            if self.inline_editor:
+                self.inline_editor.deactivate()
+            if self.block_overlay:
+                self.block_overlay.refresh()
+
+        elif event_type == "command_end":
+            if self.block_overlay:
+                self.block_overlay.refresh()
+
+    def _cleanup_blocks(self):
+        """Clean up block support resources."""
+        if self._block_fifo_reader:
+            self._block_fifo_reader.stop()
+            self._block_fifo_reader = None
 
     def get_last_terminal_focused(self, terminal):
         return self.last_terminal_focused
@@ -294,6 +367,7 @@ class RootTerminalBox(Gtk.Overlay, TerminalHolder):
         return self.notebook
 
     def remove_dead_child(self, child):
+        self._cleanup_blocks()
         page_num = self.get_notebook().page_num(self)
         self.get_notebook().remove_page(page_num)
 

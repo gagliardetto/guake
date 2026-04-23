@@ -126,6 +126,16 @@ class GuakeTerminal(Vte.Terminal):
         self.envv = [f"{i}={os.environ[i]}" for i in os.environ if i not in self.ENVV_EXCLUDE_LIST]
         self.envv.append(f"GUAKE_TAB_UUID={self.uuid}")
 
+        # Block model FIFO for shell integration
+        self.block_fifo_path = None
+        try:
+            from guake.blocks import create_block_fifo
+            self.block_fifo_path = create_block_fifo(str(self.uuid))
+            if self.block_fifo_path:
+                self.envv.append(f"GUAKE_BLOCK_FIFO={self.block_fifo_path}")
+        except Exception as e:
+            log.warning("Could not create block FIFO: %s", e)
+
         self.is_running_process = False
         self.last_exit_status = 0
 

@@ -288,3 +288,14 @@ class Keybindings:
             if key > 0:
                 self._lookup[mask][key] = action
                 self._masks |= mask
+
+        # Block navigation — hardcoded since they don't have GSettings entries yet
+        block_keys = [
+            ("<Primary><Shift>Up", self.guake.accel_block_prev),
+            ("<Primary><Shift>Down", self.guake.accel_block_next),
+        ]
+        for combo, action in block_keys:
+            key, mask = Gtk.accelerator_parse(combo)
+            if key > 0:
+                self._lookup[mask][key] = action
+                self._masks |= mask
