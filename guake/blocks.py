@@ -301,29 +301,19 @@ def create_block_fifo(terminal_uuid):
 # Block overlay — draws visual decorations on top of the terminal
 # ############################################################################
 
-class BlockOverlay(Gtk.DrawingArea):
-    """Transparent overlay that draws block separators, exit badges,
-    and duration labels over the terminal."""
+class BlockOverlay:
+    """Draws block decorations (separators, badges, duration labels) directly
+    on the terminal widget via its draw signal. No separate widget means no
+    event interception — mouse selection and right-click work normally."""
 
     def __init__(self, terminal, block_model):
-        super().__init__()
         self.terminal = terminal
         self.block_model = block_model
-
-        self.set_halign(Gtk.Align.FILL)
-        self.set_valign(Gtk.Align.FILL)
-        self.set_hexpand(True)
-        self.set_vexpand(True)
-
-        # Pure drawing layer — no input events, everything passes through
-        # to the terminal underneath via set_overlay_pass_through(True)
-        self.set_can_focus(False)
-        self.set_sensitive(False)
-        self.connect("draw", self._on_draw)
+        self._draw_handler_id = self.terminal.connect_after("draw", self._on_draw)
 
         # Redraw when terminal scrolls
         adj = self.terminal.get_vadjustment()
-        adj.connect("value-changed", lambda a: self.queue_draw())
+        adj.connect("value-changed", lambda a: self.terminal.queue_draw())
 
     def _get_char_metrics(self):
         """Get the terminal's character cell size in pixels."""
@@ -347,12 +337,12 @@ class BlockOverlay(Gtk.DrawingArea):
         _, char_h = self._get_char_metrics()
         return (absolute_row - visible_top) * char_h
 
-    def _on_draw(self, widget, cr):
+    def _on_draw(self, terminal, cr):
         """Draw block decorations."""
         if not self.block_model.blocks:
             return False
 
-        alloc = widget.get_allocation()
+        alloc = terminal.get_allocation()
         width = alloc.width
         height = alloc.height
         _, char_h = self._get_char_metrics()
@@ -462,4 +452,4 @@ class BlockOverlay(Gtk.DrawingArea):
 
     def refresh(self):
         """Schedule a redraw."""
-        self.queue_draw()
+        self.terminal.queue_draw()

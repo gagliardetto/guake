@@ -333,11 +333,9 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
             self.block_model = BlockModel(terminal)
 
-            # Block overlay (transparent drawing layer)
+            # Block overlay — draws directly on the terminal's draw signal
+            # (no separate widget = no event interception)
             self.block_overlay = BlockOverlay(terminal, self.block_model)
-            self.add_overlay(self.block_overlay)
-            self.set_overlay_pass_through(self.block_overlay, True)
-            self.block_overlay.show()
 
             # Inline editor (docked at bottom of the box — below terminal, no overlap)
             self.inline_editor = InlineEditor(terminal, self.block_model)
