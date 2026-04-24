@@ -92,8 +92,8 @@ class WorkspaceManager:
                 background-color: transparent;
             }
             .sidebar list row {
-                border-radius: 8px;
-                margin: 1px 6px;
+                border-radius: 6px;
+                margin: 0px 4px;
                 padding: 0;
                 transition: background-color 150ms ease;
             }
@@ -108,7 +108,7 @@ class WorkspaceManager:
             }
 
             .ws-name {
-                font-size: 10pt;
+                font-size: 9.5pt;
                 color: rgba(255, 255, 255, 0.85);
             }
             .ws-name-active {
@@ -117,18 +117,18 @@ class WorkspaceManager:
             }
             .ws-count-badge {
                 background-color: rgba(255, 255, 255, 0.08);
-                border-radius: 10px;
-                padding: 0px 6px;
-                font-size: 9pt;
-                min-width: 18px;
-                color: rgba(255, 255, 255, 0.45);
+                border-radius: 8px;
+                padding: 0px 5px;
+                font-size: 8pt;
+                min-width: 14px;
+                color: rgba(255, 255, 255, 0.4);
             }
             .ws-section-header {
-                font-size: 9pt;
+                font-size: 8pt;
                 font-weight: bold;
                 color: rgba(255, 255, 255, 0.3);
                 letter-spacing: 1px;
-                padding: 8px 14px 2px 14px;
+                padding: 6px 12px 1px 12px;
             }
 
             .git-status-clean { color: #26A269; }
@@ -295,10 +295,10 @@ class WorkspaceManager:
         """
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         header_box.get_style_context().add_class("sidebar-header")
-        header_box.set_margin_top(8)
-        header_box.set_margin_bottom(8)
-        header_box.set_margin_start(10)
-        header_box.set_margin_end(8)
+        header_box.set_margin_top(6)
+        header_box.set_margin_bottom(4)
+        header_box.set_margin_start(8)
+        header_box.set_margin_end(6)
 
         menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
         menu_button = Gtk.MenuButton(image=menu_icon)
@@ -380,8 +380,8 @@ class WorkspaceManager:
                 separator_row = Gtk.ListBoxRow()
                 separator_row.set_selectable(False)
                 separator = Gtk.Separator()
-                separator.set_margin_top(5)
-                separator.set_margin_bottom(5)
+                separator.set_margin_top(2)
+                separator.set_margin_bottom(2)
                 separator_row.add(separator)
                 self.workspace_listbox.add(separator_row)
 
@@ -409,8 +409,8 @@ class WorkspaceManager:
                 separator_row = Gtk.ListBoxRow()
                 separator_row.set_selectable(False)
                 separator = Gtk.Separator()
-                separator.set_margin_top(5)
-                separator.set_margin_bottom(5)
+                separator.set_margin_top(2)
+                separator.set_margin_bottom(2)
                 separator_row.add(separator)
                 self.workspace_listbox.add(separator_row)
 
@@ -467,11 +467,11 @@ class WorkspaceManager:
         list_box_row.add(event_box)
         event_box.set_visible_window(False)
 
-        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row_box.set_margin_top(6)
-        row_box.set_margin_bottom(6)
-        row_box.set_margin_start(10)
-        row_box.set_margin_end(10)
+        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row_box.set_margin_top(3)
+        row_box.set_margin_bottom(3)
+        row_box.set_margin_start(8)
+        row_box.set_margin_end(8)
         event_box.add(row_box)
 
         event_box.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
