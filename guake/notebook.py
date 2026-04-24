@@ -408,9 +408,9 @@ class TerminalNotebook(Gtk.Notebook):
                 color: rgba(224, 27, 36, 0.75);
             }}
 
-            /* --- Running glow --- */
-            .tab-running {{
-                border-top: 3px solid rgba(100, 180, 255, 0.8) !important;
+            /* --- Running glow (more specific to override hover/checked) --- */
+            #notebook-teminals tab .tab-running {{
+                border-top: 3px solid rgba(100, 180, 255, 0.8);
                 box-shadow: 0 -2px 8px rgba(100, 180, 255, 0.3),
                             0 0 4px rgba(100, 180, 255, 0.15);
             }}
