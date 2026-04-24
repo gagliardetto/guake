@@ -1,8 +1,5 @@
 #!/bin/zsh
 # Guake shell integration for Zsh
-# Source this in your .zshrc:
-#   [ -f /usr/share/guake/shell-integration.zsh ] && source /usr/share/guake/shell-integration.zsh
-#
 # Compatible with: Powerlevel10k, oh-my-zsh, prezto, vanilla zsh
 # Provides: command blocks, inline editor support, exit code tracking
 
@@ -35,6 +32,11 @@ _guake_precmd() {
     fi
 
     _guake_emit "{\"event\":\"prompt_start\"}"
+
+    # Self-healing: re-register preexec if it was wiped (e.g. by p10k)
+    if [[ ${preexec_functions[(Ie)_guake_preexec]} -eq 0 ]]; then
+        preexec_functions+=(_guake_preexec)
+    fi
 }
 
 _guake_preexec() {
@@ -51,10 +53,27 @@ _guake_preexec() {
     _guake_emit "{\"event\":\"command_start\",\"command\":\"$cmd\"}"
 }
 
-# Install hooks using add-zsh-hook (non-destructive — preserves existing hooks)
-autoload -Uz add-zsh-hook
-add-zsh-hook precmd  _guake_precmd
-add-zsh-hook preexec _guake_preexec
+# Install hooks — append directly to arrays (more robust than add-zsh-hook)
+precmd_functions+=(_guake_precmd)
+preexec_functions+=(_guake_preexec)
+
+# Watchdog: use DEBUG trap to re-install hooks after p10k deferred init
+# The trap fires once, re-installs if needed, then removes itself.
+_guake_watchdog() {
+    if [[ ${precmd_functions[(Ie)_guake_precmd]} -eq 0 ]]; then
+        precmd_functions+=(_guake_precmd)
+    fi
+    if [[ ${preexec_functions[(Ie)_guake_preexec]} -eq 0 ]]; then
+        preexec_functions+=(_guake_preexec)
+    fi
+    # Keep the trap for a few invocations then remove it
+    (( _guake_watchdog_count++ ))
+    if (( _guake_watchdog_count > 5 )); then
+        trap - DEBUG
+    fi
+}
+_guake_watchdog_count=0
+trap '_guake_watchdog' DEBUG
 
 # Emit initial prompt marker
 _guake_emit '{"event":"prompt_start"}'
