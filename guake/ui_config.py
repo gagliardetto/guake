@@ -37,6 +37,7 @@ _DEFAULTS = {
     "tab_status_font_size": 7,       # exit code badge
     "tab_max_chars": 18,             # max chars for tab title
     "tab_cmd_max_chars": 16,         # max chars for command text
+    "tab_min_width": 80,             # minimum tab width in pixels
 }
 
 _config = None

@@ -835,6 +835,7 @@ class PrefsDialog(SimpleGladeApp):
                 ("tab_status_font_size", "Exit code badge", "pt"),
                 ("tab_max_chars", "Title max characters", "chars"),
                 ("tab_cmd_max_chars", "Command max characters", "chars"),
+                ("tab_min_width", "Minimum tab width", "px"),
             ]),
         ]
 

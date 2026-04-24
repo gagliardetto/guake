@@ -356,6 +356,7 @@ class TerminalNotebook(Gtk.Notebook):
                 border-top: 3px solid transparent;
                 padding: 3px 8px 2px 8px;
                 margin: 0 2px;
+                min-width: {int(ui('tab_min_width'))}px;
                 transition: background-color 200ms ease,
                             box-shadow 200ms ease,
                             border-top-color 200ms ease;
@@ -780,6 +781,10 @@ class TerminalNotebook(Gtk.Notebook):
             )
             if not empty:
                 self.terminal_attached(terminal)
+                # Explicitly grab focus now that the terminal is in the tree
+                # and visible. This triggers on_terminal_focus → _setup_blocks
+                # which initializes block support and the inline editor.
+                terminal.grab_focus()
             self.hide_tabbar_if_one_tab()
             self.update_all_tabs_activity()
 
