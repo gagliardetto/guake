@@ -587,6 +587,43 @@ class GuakeTerminal(Vte.Terminal):
         except OSError:
             pass
 
+    _rc_integration_checked = False  # class-level: only check once per session
+
+    @classmethod
+    def _ensure_shell_integration_in_rc(cls):
+        """Add shell integration source line to .zshrc or .bashrc if not present."""
+        if cls._rc_integration_checked:
+            return
+        cls._rc_integration_checked = True
+
+        shell = os.environ.get("SHELL", "/bin/bash")
+        import guake as guake_pkg
+        data_dir = os.path.join(os.path.dirname(guake_pkg.__file__), "data")
+
+        if "zsh" in shell:
+            rc_file = os.path.expanduser("~/.zshrc")
+            script = os.path.join(data_dir, "shell-integration.zsh")
+        else:
+            rc_file = os.path.expanduser("~/.bashrc")
+            script = os.path.join(data_dir, "shell-integration.bash")
+
+        if not os.path.exists(script):
+            return
+
+        marker = "# Guake shell integration"
+        source_line = f'{marker}\n[ -n "$GUAKE_BLOCK_FIFO" ] && source "{script}"\n'
+
+        try:
+            if os.path.exists(rc_file):
+                content = open(rc_file, "r").read()
+                if marker in content:
+                    return  # already present
+            with open(rc_file, "a") as f:
+                f.write(f"\n{source_line}")
+            log.info("Added shell integration to %s", rc_file)
+        except Exception as e:
+            log.debug("Could not add shell integration to %s: %s", rc_file, e)
+
     def spawn_sync_pid(self, directory):
 
         argv = []
@@ -632,6 +669,7 @@ class GuakeTerminal(Vte.Terminal):
         self.pid = pid
 
         # Auto-source shell integration after the shell is ready
+        # Delay 2000ms to run AFTER p10k/oh-my-zsh finish deferred init
         if self._shell_integration_cmd:
             cmd = self._shell_integration_cmd
             def _auto_source():
@@ -649,7 +687,10 @@ class GuakeTerminal(Vte.Terminal):
                     except Exception as e2:
                         log.warning("Auto-source PTY write also failed: %s", e2)
                 return False
-            GLib.timeout_add(300, _auto_source)
+            GLib.timeout_add(2000, _auto_source)
+
+            # Also ensure shell integration is in .zshrc/.bashrc for persistence
+            self._ensure_shell_integration_in_rc()
 
         return pid
 
