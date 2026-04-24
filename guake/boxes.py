@@ -459,7 +459,11 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
-        log.debug("Block event received: %s", event_type)
+        if not hasattr(self, '_first_event_logged'):
+            log.info("First block event received: %s (events are flowing!)", event_type)
+            self._first_event_logged = True
+        else:
+            log.debug("Block event received: %s", event_type)
         # Update tab label with command status
         self._update_tab_command_status(event_type)
 
