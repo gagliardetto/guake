@@ -136,25 +136,62 @@ class Guake(SimpleGladeApp):
 
         super().__init__(gladefile("guake.glade"))
 
-        # Add CSS provider for custom sidebar styling
+        # Add CSS provider for custom styling
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(
             b"""
-        .sidebar {
-            background-color: #2E3436; /* Opaque dark color */
+        /* ---- Context Menus ---- */
+        menu, .context-menu {
+            background-color: rgba(30, 32, 38, 0.97);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 4px 0;
         }
-        .sidebar GtkLabel, .sidebar .button {
-            color: #EEEEEC;
+        menu menuitem {
+            padding: 4px 12px;
+            margin: 0 4px;
+            border-radius: 4px;
+            transition: background-color 100ms ease;
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 9.5pt;
         }
-        .sidebar .sidebar-title {
-            font-weight: bold;
+        menu menuitem:hover {
+            background-color: rgba(100, 160, 255, 0.15);
+            color: #fff;
         }
-        .sidebar GtkListBoxRow:hover {
-            background-color: #555753;
+        menu menuitem:disabled {
+            color: rgba(255, 255, 255, 0.35);
         }
-        .sidebar GtkListBoxRow:selected {
-            background-color: #4E9A06;
+        menu menuitem:disabled:hover {
+            background-color: transparent;
         }
+        menu separator {
+            margin: 3px 8px;
+            background-color: rgba(255, 255, 255, 0.08);
+            min-height: 1px;
+        }
+        menu menuitem label {
+            font-size: 9.5pt;
+        }
+        menu menuitem image {
+            margin-right: 6px;
+            opacity: 0.7;
+        }
+        menu menuitem accelerator {
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 8.5pt;
+        }
+        /* Submenu arrow */
+        menu menuitem arrow {
+            color: rgba(255, 255, 255, 0.3);
+            min-width: 12px;
+            min-height: 12px;
+        }
+        menu menuitem:hover arrow {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* ---- Sidebar (legacy overrides) ---- */
         .sidebar .dim-label {
             opacity: 0.7;
             font-size: small;
