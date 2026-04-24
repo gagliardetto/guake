@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 class Notification:
     """A single notification entry."""
-    __slots__ = ('id', 'title', 'body', 'source_tab', 'timestamp', 'seen', 'watcher_type')
+    __slots__ = ('id', 'title', 'body', 'source_tab', 'terminal_uuid', 'timestamp', 'seen', 'watcher_type')
 
     def __init__(self, title, body="", source_tab="", watcher_type="", terminal_uuid=""):
         self.id = str(uuid.uuid4())[:8]
