@@ -385,6 +385,12 @@ class TerminalNotebook(Gtk.Notebook):
             .tab-cmd.cmd-running {
                 color: rgba(100, 180, 255, 0.7);
             }
+            .tab-running {
+                border-radius: 4px;
+                box-shadow: 0 0 4px rgba(100, 180, 255, 0.5),
+                            inset 0 0 4px rgba(100, 180, 255, 0.08);
+                border: 1px solid rgba(100, 180, 255, 0.35);
+            }
             .tab-cmd.cmd-success {
                 color: rgba(38, 162, 105, 0.6);
             }

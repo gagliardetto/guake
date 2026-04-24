@@ -1178,6 +1178,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._cmd_label.get_style_context().remove_class("cmd-success")
         self._cmd_label.get_style_context().remove_class("cmd-fail")
         self._cmd_label.get_style_context().add_class("cmd-running")
+        self.get_style_context().add_class("tab-running")
         self._status_label.hide()
         self._spinner.show()
         self._spinner.start()
@@ -1189,6 +1190,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._spinner.stop()
         self._spinner.hide()
         self._cmd_label.get_style_context().remove_class("cmd-running")
+        self.get_style_context().remove_class("tab-running")
 
         if exit_code == 0:
             self._cmd_label.get_style_context().remove_class("cmd-fail")
@@ -1210,6 +1212,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._cmd_label.get_style_context().remove_class("cmd-running")
         self._cmd_label.get_style_context().remove_class("cmd-success")
         self._cmd_label.get_style_context().remove_class("cmd-fail")
+        self.get_style_context().remove_class("tab-running")
         self._status_label.hide()
         self._spinner.stop()
         self._spinner.hide()
