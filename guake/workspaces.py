@@ -13,7 +13,7 @@ import subprocess
 import threading
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gio, Gdk, GLib
+from gi.repository import Gtk, Gio, Gdk, GLib, Pango
 
 from guake.utils import save_tabs_when_changed
 from .emoji_selector import SearchableEmojiSelector
@@ -63,10 +63,78 @@ class WorkspaceManager:
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
+            .sidebar {
+                background-color: rgba(24, 26, 30, 0.97);
+                border-right: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .sidebar-title {
+                font-weight: bold;
+                font-size: 11pt;
+                color: rgba(255, 255, 255, 0.7);
+                letter-spacing: 1px;
+            }
+            .sidebar-header {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .sidebar-header button {
+                opacity: 0.5;
+                border-radius: 6px;
+                padding: 4px;
+                min-width: 0;
+                min-height: 0;
+            }
+            .sidebar-header button:hover {
+                opacity: 1.0;
+                background-color: rgba(255, 255, 255, 0.08);
+            }
+
+            .sidebar list {
+                background-color: transparent;
+            }
+            .sidebar list row {
+                border-radius: 8px;
+                margin: 1px 6px;
+                padding: 0;
+                transition: background-color 150ms ease;
+            }
+            .sidebar list row:hover {
+                background-color: rgba(255, 255, 255, 0.06);
+            }
+            .sidebar list row:selected {
+                background-color: rgba(100, 160, 255, 0.15);
+            }
+            .sidebar list row:selected:hover {
+                background-color: rgba(100, 160, 255, 0.20);
+            }
+
+            .ws-name {
+                font-size: 10pt;
+                color: rgba(255, 255, 255, 0.85);
+            }
+            .ws-name-active {
+                color: #6EC1E4;
+                font-weight: bold;
+            }
+            .ws-count-badge {
+                background-color: rgba(255, 255, 255, 0.08);
+                border-radius: 10px;
+                padding: 0px 6px;
+                font-size: 9pt;
+                min-width: 18px;
+                color: rgba(255, 255, 255, 0.45);
+            }
+            .ws-section-header {
+                font-size: 9pt;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.3);
+                letter-spacing: 1px;
+                padding: 8px 14px 2px 14px;
+            }
+
             .git-status-clean { color: #26A269; }
             .git-status-dirty { color: #FF7800; }
             .git-status-untracked { color: #F6D32D; }
-            .git-status-nogit { opacity: 0.4; }
+            .git-status-nogit { opacity: 0.25; }
         """)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
@@ -225,11 +293,12 @@ class WorkspaceManager:
         """
         Builds the header of the sidebar with a title and an expanded menu button.
         """
-        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        header_box.set_margin_top(6)
-        header_box.set_margin_bottom(6)
-        header_box.set_margin_start(6)
-        header_box.set_margin_end(6)
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        header_box.get_style_context().add_class("sidebar-header")
+        header_box.set_margin_top(8)
+        header_box.set_margin_bottom(8)
+        header_box.set_margin_start(10)
+        header_box.set_margin_end(8)
 
         menu_icon = Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON)
         menu_button = Gtk.MenuButton(image=menu_icon)
@@ -327,8 +396,8 @@ class WorkspaceManager:
         if pinned_workspaces:
             pinned_header = Gtk.ListBoxRow()
             pinned_header.set_selectable(False)
-            header_label = Gtk.Label(label="📌 Pinned", xalign=0)
-            header_label.get_style_context().add_class("dim-label")
+            header_label = Gtk.Label(label="PINNED", xalign=0)
+            header_label.get_style_context().add_class("ws-section-header")
             pinned_header.add(header_label)
             self.workspace_listbox.add(pinned_header)
 
@@ -398,11 +467,11 @@ class WorkspaceManager:
         list_box_row.add(event_box)
         event_box.set_visible_window(False)
 
-        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row_box.set_margin_top(4)
-        row_box.set_margin_bottom(4)
-        row_box.set_margin_start(8)
-        row_box.set_margin_end(8)
+        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row_box.set_margin_top(6)
+        row_box.set_margin_bottom(6)
+        row_box.set_margin_start(10)
+        row_box.set_margin_end(10)
         event_box.add(row_box)
 
         event_box.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
@@ -418,16 +487,30 @@ class WorkspaceManager:
             event_box.connect("drag-data-delete", self.on_row_drag_data_delete)
             event_box.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, DND_TARGET, Gdk.DragAction.MOVE)
 
-        label_text = f"{ws_data.get('icon', '')} {ws_data['name']}"
+        # Workspace name
+        icon = ws_data.get('icon', '')
+        name = ws_data['name']
+        label_text = f"{icon}  {name}" if icon else name
         label = Gtk.Label(label=label_text, xalign=0)
         label.set_hexpand(True)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.get_style_context().add_class("ws-name")
+
+        # Highlight active workspace
+        active_ws_id = self.workspaces_data.get("active_workspace")
+        if ws_data["id"] == active_ws_id:
+            label.get_style_context().add_class("ws-name-active")
+
         row_box.pack_start(label, True, True, 0)
 
+        # Tab count as pill badge
         tab_count = len(ws_data.get("terminals", []))
-        count_label = Gtk.Label(label=str(tab_count))
-        count_label.get_style_context().add_class("dim-label")
-        row_box.pack_start(count_label, False, False, 0)
+        if tab_count > 0:
+            count_label = Gtk.Label(label=str(tab_count))
+            count_label.get_style_context().add_class("ws-count-badge")
+            row_box.pack_start(count_label, False, False, 0)
 
+        # Git status icon
         if not is_special:
             status = self._git_status_cache.get(ws_data["id"], 'no-git')
             icon_name, tooltip = self._get_git_icon_and_tooltip(status)
@@ -436,7 +519,7 @@ class WorkspaceManager:
             git_icon.get_style_context().add_class(f"git-status-{status}")
             row_box.pack_end(git_icon, False, False, 0)
 
-        # Show spinner if this workspace is still loading
+        # Loading spinner
         if ws_data["id"] in self._loading_workspaces:
             spinner = Gtk.Spinner()
             spinner.start()
