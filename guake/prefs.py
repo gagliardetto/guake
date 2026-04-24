@@ -758,59 +758,130 @@ class PrefsDialog(SimpleGladeApp):
             "guake", "ui_config.json"
         )
 
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        page.set_margin_top(12)
-        page.set_margin_bottom(12)
-        page.set_margin_start(16)
-        page.set_margin_end(16)
-
-        header = Gtk.Label(xalign=0)
-        header.set_markup("<b>UI Customization</b>")
-        page.pack_start(header, False, False, 0)
-
-        desc = Gtk.Label(xalign=0)
-        desc.set_markup(
-            "<small>Font sizes and layout. Changes take effect on restart.</small>"
+        # CSS for the settings page
+        css = Gtk.CssProvider()
+        css.load_from_data(b"""
+            .ui-prefs-page {
+                background-color: @theme_bg_color;
+            }
+            .ui-section-card {
+                border-radius: 8px;
+                padding: 4px 0;
+                margin: 4px 0;
+            }
+            .ui-section-title {
+                font-weight: bold;
+                font-size: 12pt;
+                margin-bottom: 2px;
+            }
+            .ui-section-title-icon {
+                font-size: 14pt;
+                margin-right: 4px;
+            }
+            .ui-setting-row {
+                padding: 6px 16px;
+                min-height: 32px;
+            }
+            .ui-setting-label {
+                font-size: 10pt;
+            }
+            .ui-setting-default {
+                font-size: 9pt;
+                opacity: 0.5;
+                margin-left: 4px;
+            }
+            .ui-save-bar {
+                padding: 8px 16px;
+                border-top: 1px solid alpha(@theme_fg_color, 0.1);
+                margin-top: 8px;
+            }
+            .ui-save-bar button {
+                padding: 6px 16px;
+            }
+            .ui-save-status {
+                font-size: 10pt;
+                opacity: 0.6;
+                margin-left: 12px;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-        page.pack_start(desc, False, False, 4)
-        page.pack_start(Gtk.Separator(), False, False, 4)
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(12)
-        grid.set_row_spacing(6)
+        # Page container
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        page.get_style_context().add_class("ui-prefs-page")
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(20)
+        content.set_margin_end(20)
 
         sections = [
-            ("Sidebar", [
-                ("sidebar_font_size", "Workspace name size"),
-                ("sidebar_header_font_size", "Header size"),
-                ("sidebar_badge_font_size", "Badge size"),
-                ("sidebar_section_font_size", "Section header size"),
+            ("◧", "Sidebar", [
+                ("sidebar_font_size", "Workspace name", "pt"),
+                ("sidebar_header_font_size", "Header title", "pt"),
+                ("sidebar_badge_font_size", "Tab count badge", "pt"),
+                ("sidebar_section_font_size", "Section label", "pt"),
             ]),
-            ("Tabs", [
-                ("tab_title_font_size", "Tab title size"),
-                ("tab_command_font_size", "Command text size"),
-                ("tab_status_font_size", "Status badge size"),
-                ("tab_max_chars", "Tab title max chars"),
-                ("tab_cmd_max_chars", "Command max chars"),
+            ("▭", "Tabs", [
+                ("tab_title_font_size", "Tab title", "pt"),
+                ("tab_command_font_size", "Command status", "pt"),
+                ("tab_status_font_size", "Exit code badge", "pt"),
+                ("tab_max_chars", "Title max characters", "chars"),
+                ("tab_cmd_max_chars", "Command max characters", "chars"),
             ]),
         ]
 
         self._ui_spinners = {}
-        row = 0
 
-        for section_name, fields in sections:
-            section_label = Gtk.Label(xalign=0)
-            section_label.set_markup(f"\n<b>{section_name}</b>")
-            grid.attach(section_label, 0, row, 2, 1)
-            row += 1
+        for icon, section_name, fields in sections:
+            # Section header
+            header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            header_box.set_margin_start(4)
+            header_box.set_margin_top(4)
 
-            for key, label_text in fields:
+            icon_label = Gtk.Label(label=icon)
+            icon_label.get_style_context().add_class("ui-section-title-icon")
+            header_box.pack_start(icon_label, False, False, 0)
+
+            title = Gtk.Label(label=section_name, xalign=0)
+            title.get_style_context().add_class("ui-section-title")
+            header_box.pack_start(title, False, False, 0)
+
+            content.pack_start(header_box, False, False, 0)
+
+            # Settings card
+            card = Gtk.ListBox()
+            card.set_selection_mode(Gtk.SelectionMode.NONE)
+            card.get_style_context().add_class("ui-section-card")
+
+            for key, label_text, unit in fields:
+                row = Gtk.ListBoxRow()
+                row.set_selectable(False)
+
+                row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                row_box.get_style_context().add_class("ui-setting-row")
+
+                # Label + unit hint
                 label = Gtk.Label(label=label_text, xalign=0)
+                label.get_style_context().add_class("ui-setting-label")
                 label.set_hexpand(True)
-                grid.attach(label, 0, row, 1, 1)
+                row_box.pack_start(label, True, True, 0)
 
-                current_val = ui(key)
+                # Default value hint
                 default_val = _DEFAULTS[key]
+                default_label = Gtk.Label(label=f"({default_val}{unit})")
+                default_label.get_style_context().add_class("ui-setting-default")
+                row_box.pack_start(default_label, False, False, 0)
+
+                # Spinner
+                current_val = ui(key)
                 is_int = isinstance(default_val, int)
 
                 if is_int:
@@ -820,25 +891,37 @@ class PrefsDialog(SimpleGladeApp):
                     adj = Gtk.Adjustment(value=current_val, lower=4.0, upper=30.0, step_increment=0.5)
                     spinner = Gtk.SpinButton(adjustment=adj, digits=1)
 
-                spinner.set_tooltip_text(f"Default: {default_val}")
-                grid.attach(spinner, 1, row, 1, 1)
+                spinner.set_size_request(80, -1)
+                row_box.pack_end(spinner, False, False, 0)
                 self._ui_spinners[key] = spinner
-                row += 1
 
-        page.pack_start(grid, False, False, 0)
+                row.add(row_box)
+                card.add(row)
 
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        btn_box.set_margin_top(12)
+            frame = Gtk.Frame()
+            frame.add(card)
+            content.pack_start(frame, False, False, 0)
 
-        save_btn = Gtk.Button(label="Save (restart to apply)")
+        scroll.add(content)
+        page.pack_start(scroll, True, True, 0)
+
+        # Bottom save bar
+        save_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        save_bar.get_style_context().add_class("ui-save-bar")
+
+        save_btn = Gtk.Button(label="Save")
         save_btn.connect("clicked", lambda w: self._save_ui_config(config_path))
-        btn_box.pack_start(save_btn, False, False, 0)
+        save_bar.pack_start(save_btn, False, False, 0)
 
         reset_btn = Gtk.Button(label="Reset to Defaults")
         reset_btn.connect("clicked", lambda w: self._reset_ui_config(config_path))
-        btn_box.pack_start(reset_btn, False, False, 0)
+        save_bar.pack_start(reset_btn, False, False, 0)
 
-        page.pack_start(btn_box, False, False, 0)
+        self._save_status = Gtk.Label(label="")
+        self._save_status.get_style_context().add_class("ui-save-status")
+        save_bar.pack_start(self._save_status, False, False, 0)
+
+        page.pack_end(save_bar, False, False, 0)
 
         tab_label = Gtk.Label(label="UI")
         notebook.append_page(page, tab_label)
@@ -857,6 +940,8 @@ class PrefsDialog(SimpleGladeApp):
         log.info("UI config saved to %s", config_path)
         from guake import ui_config
         ui_config.reload()
+        self._save_status.set_text("✓ Saved — restart to apply")
+        GLib.timeout_add(4000, lambda: self._save_status.set_text(""))
 
     def _reset_ui_config(self, config_path):
         """Reset all spinners to defaults."""
@@ -870,6 +955,8 @@ class PrefsDialog(SimpleGladeApp):
             pass
         from guake import ui_config
         ui_config.reload()
+        self._save_status.set_text("✓ Reset to defaults")
+        GLib.timeout_add(4000, lambda: self._save_status.set_text(""))
 
     def spawn_sync_pid(self, directory=None, terminal=None):
         argv = []
