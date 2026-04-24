@@ -767,6 +767,13 @@ class TerminalNotebook(Gtk.Notebook):
         )
         self.set_tab_reorderable(root_terminal_box, True)
 
+        # Create a proper tab label with command status support
+        tab_title = directory or "Terminal"
+        if "/" in str(tab_title):
+            tab_title = os.path.basename(tab_title) or tab_title
+        tab_label = TabLabelWithIndicator(self, tab_title, self.guake.settings)
+        self.set_tab_label(root_terminal_box, tab_label)
+
         # Spawn terminal AFTER the page is inserted (and hidden in quiet mode)
         if empty:
             terminal = None
