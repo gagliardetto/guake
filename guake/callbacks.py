@@ -165,21 +165,29 @@ class NotebookScrollCallback:
         self.notebook = notebook
 
     def on_scroll(self, widget, event):
-        direction = event.get_scroll_direction().direction
+        # get_scroll_direction returns (success, direction)
+        success, direction = event.get_scroll_direction()
+
+        if success:
+            # Discrete scroll (mouse wheel clicks)
+            go_next = direction in (Gdk.ScrollDirection.DOWN, Gdk.ScrollDirection.RIGHT)
+        else:
+            # Smooth scroll (touchpad) — check deltas
+            _, dx, dy = event.get_scroll_deltas()
+            if abs(dy) < 0.1 and abs(dx) < 0.1:
+                return True  # too small, ignore
+            go_next = dy > 0 or dx > 0
+
         if hasattr(self.notebook, 'guake') and self.notebook.guake:
-            # Use workspace-aware navigation that skips hidden pages
-            if direction is Gdk.ScrollDirection.DOWN or direction is Gdk.ScrollDirection.RIGHT:
+            if go_next:
                 self.notebook.guake.accel_next()
             else:
                 self.notebook.guake.accel_prev()
         else:
-            # Fallback for notebooks without guake attached
-            if direction is Gdk.ScrollDirection.DOWN or direction is Gdk.ScrollDirection.RIGHT:
+            if go_next:
                 self.notebook.next_page()
             else:
                 self.notebook.prev_page()
-        # important to return True to stop propagation of the event
-        # from the label up to the notebook
         return True
 
 
