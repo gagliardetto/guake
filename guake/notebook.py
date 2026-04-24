@@ -343,17 +343,17 @@ class TerminalNotebook(Gtk.Notebook):
                 background-color: rgba(24, 26, 30, 0.97);
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
                 border-bottom: none;
-                padding: 2px 4px;
+                padding: 1px 2px;
             }
             #notebook-teminals tab {
                 background-color: transparent;
                 border: none;
-                border-radius: 6px;
-                padding: 3px 8px;
-                margin: 2px 1px;
+                border-radius: 4px;
+                padding: 2px 5px;
+                margin: 1px 0px;
                 transition: background-color 150ms ease;
                 color: rgba(255, 255, 255, 0.5);
-                font-size: 9.5pt;
+                font-size: 9pt;
             }
             #notebook-teminals tab:hover {
                 background-color: rgba(255, 255, 255, 0.06);

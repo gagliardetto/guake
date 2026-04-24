@@ -8,7 +8,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GObject
 from gi.repository import Gdk
 from gi.repository import Gio
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Pango
 from gi.repository import Vte
 
 from guake.callbacks import MenuHideCallback
@@ -1093,6 +1093,8 @@ class TabLabelEventBox(Gtk.EventBox):
         self.notebook = notebook
         self.box = Gtk.Box(homogeneous=Gtk.Orientation.HORIZONTAL, spacing=0, visible=True)
         self.label = Gtk.Label(label=text, visible=True)
+        self.label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.label.set_max_width_chars(20)
         self.close_button = Gtk.Button(
             image=Gtk.Image.new_from_icon_name("window-close", Gtk.IconSize.MENU),
             relief=Gtk.ReliefStyle.NONE,
