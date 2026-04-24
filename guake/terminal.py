@@ -138,6 +138,37 @@ _HANGUL_FILLERS = {
     '\u1160': 'hangul jungseong filler',
 }
 
+# Hidden line breaks — look like spaces but act as newlines
+_LINE_SEPARATORS = {
+    '\u2028': 'line separator',
+    '\u2029': 'paragraph separator',
+}
+
+# Deprecated Unicode formatting characters
+_DEPRECATED_FORMAT = {
+    '\u206a': 'inhibit symmetric swapping',
+    '\u206b': 'activate symmetric swapping',
+    '\u206c': 'inhibit Arabic form shaping',
+    '\u206d': 'activate Arabic form shaping',
+    '\u206e': 'national digit shapes',
+    '\u206f': 'nominal digit shapes',
+}
+
+# Interlinear annotation characters — can hide text between visible chars
+_INTERLINEAR = {
+    '\ufff9': 'interlinear annotation anchor',
+    '\ufffa': 'interlinear annotation separator',
+    '\ufffb': 'interlinear annotation terminator',
+}
+
+# Other invisible/deceptive characters
+_OTHER_INVISIBLE = {
+    '\u00ad': ('soft_hyphen', 'medium', 'Soft hyphen (invisible, changes word boundaries)'),
+    '\u2060': ('word_joiner', 'medium', 'Word joiner (invisible no-break)'),
+    '\u034f': ('combining_grapheme', 'medium', 'Combining grapheme joiner'),
+    '\ufffc': ('object_replacement', 'medium', 'Object replacement character'),
+}
+
 
 class PasteThreat:
     """A single suspicious element found in pasted text."""
@@ -292,6 +323,59 @@ def scan_paste(text):
             threats.append(PasteThreat(
                 'variation_selector', 'medium', char,
                 f"Variation selector",
+                i))
+            continue
+
+        # 10. Hidden line separators (look like spaces, act as newlines)
+        if char in _LINE_SEPARATORS:
+            threats.append(PasteThreat(
+                'line_separator', 'high', char,
+                f"Hidden line break: {_LINE_SEPARATORS[char]}",
+                i))
+            continue
+
+        # 11. Deprecated format characters
+        if char in _DEPRECATED_FORMAT:
+            threats.append(PasteThreat(
+                'deprecated_format', 'medium', char,
+                f"Deprecated format: {_DEPRECATED_FORMAT[char]}",
+                i))
+            continue
+
+        # 12. Interlinear annotations (can hide text)
+        if char in _INTERLINEAR:
+            threats.append(PasteThreat(
+                'interlinear', 'high', char,
+                f"Annotation: {_INTERLINEAR[char]}",
+                i))
+            continue
+
+        # 13. Other invisible/deceptive characters
+        if char in _OTHER_INVISIBLE:
+            cat, sev, desc = _OTHER_INVISIBLE[char]
+            threats.append(PasteThreat(cat, sev, char, desc, i))
+            continue
+
+        # 14. Excessive combining characters (zalgo text — obscures underlying chars)
+        if unicodedata.category(char).startswith('M'):  # Mark category
+            # Count consecutive combining chars
+            count = 0
+            j = i
+            while j < len(text) and unicodedata.category(text[j]).startswith('M'):
+                count += 1
+                j += 1
+            if count >= 3:  # 3+ combining marks on one base = suspicious
+                threats.append(PasteThreat(
+                    'zalgo', 'medium', char,
+                    f"Excessive combining marks ({count} stacked)",
+                    i))
+            continue
+
+        # 15. Private Use Area (no standard meaning — can hide anything)
+        if (0xE000 <= cp <= 0xF8FF) or (0xF0000 <= cp <= 0xFFFFD) or (0x100000 <= cp <= 0x10FFFD):
+            threats.append(PasteThreat(
+                'private_use', 'medium', char,
+                f"Private Use Area character",
                 i))
             continue
 
@@ -532,6 +616,15 @@ class GuakeTerminal(Vte.Terminal):
             'math_symbol': '🔢 Math alphanumeric symbol',
             'variation_selector': '🎨 Variation selector',
             'hidden_multiline': '📋 Hidden multiline command',
+            'line_separator': '↩ Hidden line separator',
+            'deprecated_format': '⚠ Deprecated format character',
+            'interlinear': '📝 Interlinear annotation (hidden text)',
+            'soft_hyphen': '➖ Soft hyphen (invisible)',
+            'word_joiner': '🔗 Word joiner (invisible)',
+            'combining_grapheme': '🔗 Combining grapheme joiner',
+            'object_replacement': '⬛ Object replacement character',
+            'zalgo': '👹 Excessive combining marks (zalgo)',
+            'private_use': '🔒 Private Use Area character',
         }
 
         details = []
