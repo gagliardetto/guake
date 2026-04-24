@@ -777,6 +777,8 @@ class TerminalNotebook(Gtk.Notebook):
         if "/" in str(tab_title):
             tab_title = os.path.basename(tab_title) or tab_title
         tab_label = TabLabelWithIndicator(self, tab_title, self.guake.settings)
+        tab_label.add_events(Gdk.EventMask.SCROLL_MASK)
+        tab_label.connect("scroll-event", self.scroll_callback.on_scroll)
         self.set_tab_label(root_terminal_box, tab_label)
 
         # Spawn terminal AFTER the page is inserted (and hidden in quiet mode)
