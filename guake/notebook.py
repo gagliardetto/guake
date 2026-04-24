@@ -342,64 +342,80 @@ class TerminalNotebook(Gtk.Notebook):
                 background-color: rgba(24, 26, 30, 0.97);
             }}
             #notebook-teminals header.bottom {{
-                background-color: rgba(24, 26, 30, 0.97);
+                background-color: rgba(20, 22, 26, 0.98);
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
                 border-bottom: none;
-                padding: 1px 2px;
+                padding: 2px 4px 0 4px;
             }}
+
+            /* --- Tab base --- */
             #notebook-teminals tab {{
-                background-color: transparent;
+                background-color: rgba(26, 26, 26, 0.95);
                 border: none;
-                border-radius: 4px;
-                padding: 2px 6px;
-                margin: 1px 0px;
-                transition: background-color 150ms ease;
+                border-radius: 5px 5px 0 0;
+                border-top: 3px solid transparent;
+                padding: 3px 8px 2px 8px;
+                margin: 0 2px;
+                transition: background-color 200ms ease,
+                            box-shadow 200ms ease,
+                            border-top-color 200ms ease;
             }}
+
+            /* --- Hover --- */
             #notebook-teminals tab:hover {{
-                background-color: rgba(255, 255, 255, 0.06);
+                background-color: rgba(42, 42, 42, 0.95);
+                border-top: 3px solid #9400D3;
+                box-shadow: 0 -2px 6px rgba(148, 0, 211, 0.15);
             }}
+
+            /* --- Active tab --- */
             #notebook-teminals tab:checked {{
-                background-color: rgba(100, 160, 255, 0.12);
+                background-color: rgba(58, 58, 58, 0.95);
+                border-top: 3px solid #6EC1E4;
+                box-shadow: 0 -2px 8px rgba(110, 193, 228, 0.15);
             }}
             #notebook-teminals tab:checked:hover {{
-                background-color: rgba(100, 160, 255, 0.18);
+                background-color: rgba(64, 64, 64, 0.95);
+                border-top: 3px solid #6EC1E4;
             }}
 
+            /* --- Title label --- */
             .tab-title {{
                 font-size: {ui('tab_title_font_size')}pt;
-                font-weight: bold;
-                color: rgba(255, 255, 255, 0.55);
-            }}
-            #notebook-teminals tab:checked .tab-title {{
-                color: #6EC1E4;
+                font-weight: 600;
+                color: rgba(224, 224, 224, 0.6);
             }}
             #notebook-teminals tab:hover .tab-title {{
-                color: rgba(255, 255, 255, 0.8);
+                color: #ffffff;
             }}
-            #notebook-teminals tab:checked:hover .tab-title {{
-                color: #6EC1E4;
+            #notebook-teminals tab:checked .tab-title {{
+                color: #ffffff;
+                font-weight: 700;
             }}
 
+            /* --- Command status label --- */
             .tab-cmd {{
                 font-size: {ui('tab_command_font_size')}pt;
-                color: rgba(255, 255, 255, 0.3);
+                color: rgba(255, 255, 255, 0.25);
             }}
             .tab-cmd.cmd-running {{
-                color: rgba(100, 180, 255, 0.7);
-            }}
-            .tab-running {{
-                border-radius: 4px;
-                box-shadow: 0 0 4px rgba(100, 180, 255, 0.5),
-                            inset 0 0 4px rgba(100, 180, 255, 0.08);
-                border: 1px solid rgba(100, 180, 255, 0.35);
+                color: rgba(100, 180, 255, 0.8);
             }}
             .tab-cmd.cmd-success {{
-                color: rgba(38, 162, 105, 0.6);
+                color: rgba(38, 162, 105, 0.65);
             }}
             .tab-cmd.cmd-fail {{
-                color: rgba(224, 27, 36, 0.7);
+                color: rgba(224, 27, 36, 0.75);
             }}
 
+            /* --- Running glow --- */
+            .tab-running {{
+                border-top: 3px solid rgba(100, 180, 255, 0.8) !important;
+                box-shadow: 0 -2px 8px rgba(100, 180, 255, 0.3),
+                            0 0 4px rgba(100, 180, 255, 0.15);
+            }}
+
+            /* --- Exit status badge --- */
             .tab-status {{
                 font-size: {ui('tab_status_font_size')}pt;
                 font-weight: bold;
@@ -411,12 +427,15 @@ class TerminalNotebook(Gtk.Notebook):
                 color: #E01B24;
             }}
 
+            /* --- Close button (hidden until hover) --- */
             #notebook-teminals tab button {{
                 opacity: 0;
                 min-width: 0;
                 min-height: 0;
                 padding: 0px;
                 border-radius: 3px;
+                background: transparent;
+                border: none;
                 transition: opacity 150ms ease;
             }}
             #notebook-teminals tab:hover button,
@@ -425,14 +444,19 @@ class TerminalNotebook(Gtk.Notebook):
             }}
             #notebook-teminals tab button:hover {{
                 opacity: 1.0;
-                background-color: rgba(255, 80, 80, 0.3);
+                color: #ff4b5c;
+                background-color: rgba(255, 75, 92, 0.15);
             }}
+
+            /* --- Action buttons (new tab, pin, etc) --- */
             #notebook-teminals header.bottom button {{
                 opacity: 0.5;
                 border-radius: 4px;
-                padding: 2px 4px;
+                padding: 4px 6px;
                 min-width: 0;
                 min-height: 0;
+                background: inherit;
+                border: none;
             }}
             #notebook-teminals header.bottom button:hover {{
                 opacity: 1.0;
