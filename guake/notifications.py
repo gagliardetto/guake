@@ -28,11 +28,12 @@ class Notification:
     """A single notification entry."""
     __slots__ = ('id', 'title', 'body', 'source_tab', 'timestamp', 'seen', 'watcher_type')
 
-    def __init__(self, title, body="", source_tab="", watcher_type=""):
+    def __init__(self, title, body="", source_tab="", watcher_type="", terminal_uuid=""):
         self.id = str(uuid.uuid4())[:8]
         self.title = title
         self.body = body
         self.source_tab = source_tab
+        self.terminal_uuid = terminal_uuid
         self.timestamp = time.time()
         self.seen = False
         self.watcher_type = watcher_type
@@ -140,6 +141,7 @@ class WatcherManager:
                     body=command or "(no command)",
                     source_tab=tab_title or w.tab_title,
                     watcher_type="cmd-complete",
+                    terminal_uuid=terminal_uuid,
                 ))
                 if w.once:
                     to_remove.append(w.id)
@@ -160,6 +162,7 @@ class WatcherManager:
                         body=match.group(0)[:100],
                         source_tab=tab_title or w.tab_title,
                         watcher_type="regex",
+                        terminal_uuid=terminal_uuid,
                     ))
 
 
@@ -463,7 +466,12 @@ class NotificationCenter:
     def _create_notification_row(self, n):
         """Create a row widget for a notification."""
         row = Gtk.ListBoxRow()
-        row.set_selectable(False)
+        row.set_selectable(True)
+
+        # Wrap in EventBox for click handling
+        event_box = Gtk.EventBox()
+        event_box.connect("button-press-event",
+                          lambda w, e, tuuid=n.terminal_uuid, nid=n.id: self._on_notification_click(tuuid, nid))
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.get_style_context().add_class("notification-row")
@@ -503,8 +511,40 @@ class NotificationCenter:
             meta_box.pack_end(mark_btn, False, False, 0)
 
         box.pack_start(meta_box, False, False, 0)
-        row.add(box)
+        event_box.add(box)
+        row.add(event_box)
         return row
+
+    def _on_notification_click(self, terminal_uuid, notification_id):
+        """Navigate to the terminal that triggered this notification."""
+        # Mark as seen
+        self._mark_seen(notification_id)
+        # Navigate and close popup
+        if terminal_uuid:
+            self._navigate_to_terminal(terminal_uuid)
+        self._hide_popup()
+
+    def _navigate_to_terminal(self, terminal_uuid):
+        """Switch to the workspace and tab containing this terminal."""
+        if not self.guake or not self.guake.workspace_manager:
+            return
+
+        # Find which workspace contains this terminal
+        for ws in self.guake.workspace_manager.get_all_workspaces():
+            if terminal_uuid in ws.get("terminals", []):
+                # Switch to workspace
+                self.guake.switch_to_workspace(ws["id"])
+                # Find and focus the tab
+                nb = self.guake.get_notebook()
+                if nb:
+                    for i in range(nb.get_n_pages()):
+                        page = nb.get_nth_page(i)
+                        for t in page.iter_terminals():
+                            if str(t.uuid) == terminal_uuid:
+                                nb.set_current_page(i)
+                                t.grab_focus()
+                                return
+                return
 
     def _mark_seen(self, notification_id):
         for n in self.notifications:
@@ -534,6 +574,10 @@ class NotificationCenter:
         section.pack_start(header, False, False, 0)
 
         for w in watchers:
+            row_event = Gtk.EventBox()
+            row_event.connect("button-press-event",
+                              lambda eb, ev, tuuid=w.terminal_uuid: self._on_watcher_click(tuuid))
+
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
             icon = "🔔" if isinstance(w, CommandCompleteWatcher) else "🔍"
             label = Gtk.Label(label=f"{icon} {w.description}", xalign=0)
@@ -546,7 +590,8 @@ class NotificationCenter:
             remove_btn.connect("clicked", lambda w, wid=w.id: self._remove_watcher(wid))
             row.pack_end(remove_btn, False, False, 0)
 
-            section.pack_start(row, False, False, 0)
+            row_event.add(row)
+            section.pack_start(row_event, False, False, 0)
 
         self._watchers_box.pack_start(section, False, False, 0)
         self._watchers_box.show_all()
@@ -554,3 +599,9 @@ class NotificationCenter:
     def _remove_watcher(self, watcher_id):
         self.watcher_manager.remove(watcher_id)
         self._rebuild_watchers()
+
+    def _on_watcher_click(self, terminal_uuid):
+        """Navigate to the watched terminal."""
+        if terminal_uuid:
+            self._navigate_to_terminal(terminal_uuid)
+        self._hide_popup()
