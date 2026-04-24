@@ -634,7 +634,22 @@ class GuakeTerminal(Vte.Terminal):
         # Auto-source shell integration after the shell is ready
         if self._shell_integration_cmd:
             cmd = self._shell_integration_cmd
-            GLib.timeout_add(300, lambda: self.feed_child(cmd + "\n") or False)
+            def _auto_source():
+                try:
+                    self.feed_child(cmd + "\n")
+                    log.info("Auto-sourced shell integration: %s", cmd[:80])
+                except Exception as e:
+                    log.warning("Auto-source feed_child failed: %s, trying PTY write", e)
+                    try:
+                        pty = self.get_pty()
+                        if pty:
+                            fd = pty.get_fd()
+                            os.write(fd, (cmd + "\n").encode())
+                            log.info("Auto-sourced via PTY fd %d", fd)
+                    except Exception as e2:
+                        log.warning("Auto-source PTY write also failed: %s", e2)
+                return False
+            GLib.timeout_add(300, _auto_source)
 
         return pid
 
