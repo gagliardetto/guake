@@ -128,11 +128,23 @@ class GuakeTerminal(Vte.Terminal):
 
         # Block model FIFO for shell integration
         self.block_fifo_path = None
+        self._shell_integration_cmd = None
         try:
             from guake.blocks import create_block_fifo
             self.block_fifo_path = create_block_fifo(str(self.uuid))
             if self.block_fifo_path:
                 self.envv.append(f"GUAKE_BLOCK_FIFO={self.block_fifo_path}")
+                # Find shell integration scripts
+                import guake as guake_pkg
+                data_dir = os.path.join(os.path.dirname(guake_pkg.__file__), "data")
+                bash_script = os.path.join(data_dir, "shell-integration.bash")
+                zsh_script = os.path.join(data_dir, "shell-integration.zsh")
+                # Determine which shell will be used
+                shell = os.environ.get("SHELL", "/bin/bash")
+                if "zsh" in shell and os.path.exists(zsh_script):
+                    self._shell_integration_cmd = f'source "{zsh_script}" 2>/dev/null; clear'
+                elif os.path.exists(bash_script):
+                    self._shell_integration_cmd = f'source "{bash_script}" 2>/dev/null; clear'
         except Exception as e:
             log.warning("Could not create block FIFO: %s", e)
 
@@ -618,6 +630,12 @@ class GuakeTerminal(Vte.Terminal):
         if libutempter is not None:
             libutempter.utempter_add_record(self.get_pty().get_fd(), os.uname()[1])
         self.pid = pid
+
+        # Auto-source shell integration after the shell is ready
+        if self._shell_integration_cmd:
+            cmd = self._shell_integration_cmd
+            GLib.timeout_add(300, lambda: self.feed_child(cmd + "\n") or False)
+
         return pid
 
     def set_color_foreground(self, font_color, *args, **kwargs):
