@@ -267,6 +267,12 @@ class InlineEditor(Gtk.Revealer):
             self.terminal.feed_child("\n")
             return
 
+        # Security scan before executing
+        from guake.terminal import scan_paste
+        threats = [t for t in scan_paste(text) if t.category != 'hidden_multiline']
+        if threats and not self._show_command_warning(text, threats):
+            return  # user cancelled
+
         # Save to local history
         if not self._history or self._history[-1] != text:
             self._history.append(text)
@@ -280,6 +286,49 @@ class InlineEditor(Gtk.Revealer):
         # Clear editor and deactivate (command_start event will also deactivate)
         self.buffer.set_text("")
         self.deactivate()
+
+    def _show_command_warning(self, text, threats):
+        """Show warning about suspicious characters in a command.
+        Returns True to proceed, False to cancel."""
+        try:
+            from gi.repository import Gtk, GLib
+
+            critical = any(t.severity == 'critical' for t in threats)
+            window = None
+            if hasattr(self.terminal, 'guake') and self.terminal.guake:
+                window = self.terminal.guake.window
+
+            dialog = Gtk.MessageDialog(
+                transient_for=window,
+                modal=True,
+                message_type=Gtk.MessageType.ERROR if critical else Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.NONE,
+                text=f"Suspicious command ({'CRITICAL' if critical else 'WARNING'})",
+            )
+
+            lines = []
+            seen = set()
+            for t in threats[:10]:
+                if t.category not in seen:
+                    lines.append(f"\n<b>{GLib.markup_escape_text(t.category)}</b>")
+                    seen.add(t.category)
+                lines.append(f"  <tt>{GLib.markup_escape_text(t.codepoint)}</tt>: "
+                             f"{GLib.markup_escape_text(t.description)}")
+
+            preview = GLib.markup_escape_text(text[:150])
+            dialog.format_secondary_markup(
+                "\n".join(lines) + f"\n\n<b>Command:</b>\n<tt>{preview}</tt>"
+            )
+
+            dialog.add_button("Don't Execute", Gtk.ResponseType.CANCEL)
+            dialog.add_button("Execute Anyway", Gtk.ResponseType.ACCEPT)
+            dialog.set_default_response(Gtk.ResponseType.CANCEL)
+
+            response = dialog.run()
+            dialog.destroy()
+            return response == Gtk.ResponseType.ACCEPT
+        except Exception:
+            return True  # if dialog fails, don't block execution
 
     # ---- Key handling ----
 

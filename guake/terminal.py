@@ -582,7 +582,6 @@ class GuakeTerminal(Vte.Terminal):
         # Group by severity
         critical = [t for t in threats if t.severity == 'critical']
         high = [t for t in threats if t.severity == 'high']
-        medium = [t for t in threats if t.severity == 'medium']
 
         if critical:
             severity_text = "CRITICAL"
@@ -599,53 +598,59 @@ class GuakeTerminal(Vte.Terminal):
             modal=True,
             message_type=msg_type,
             buttons=Gtk.ButtonsType.NONE,
-            text=f"⚠ Paste security warning ({severity_text})",
+            text=f"Paste security warning ({severity_text})",
         )
 
         # Category labels
         cat_names = {
-            'homoglyph': '🔤 Homoglyph (lookalike character)',
-            'bidi': '↔ Bidi control (text direction attack)',
-            'zero_width': '👻 Zero-width invisible character',
-            'ansi_escape': '🖥 ANSI escape sequence',
-            'control_char': '⌨ Control character',
-            'unicode_tag': '🏷 Unicode tag (hidden ASCII)',
-            'invisible_math': '📐 Invisible math operator',
-            'invisible_ws': '⬜ Invisible whitespace',
-            'hangul_filler': '🇰🇷 Hangul filler',
-            'math_symbol': '🔢 Math alphanumeric symbol',
-            'variation_selector': '🎨 Variation selector',
-            'hidden_multiline': '📋 Hidden multiline command',
-            'line_separator': '↩ Hidden line separator',
-            'deprecated_format': '⚠ Deprecated format character',
-            'interlinear': '📝 Interlinear annotation (hidden text)',
-            'soft_hyphen': '➖ Soft hyphen (invisible)',
-            'word_joiner': '🔗 Word joiner (invisible)',
-            'combining_grapheme': '🔗 Combining grapheme joiner',
-            'object_replacement': '⬛ Object replacement character',
-            'zalgo': '👹 Excessive combining marks (zalgo)',
-            'private_use': '🔒 Private Use Area character',
+            'homoglyph': 'Homoglyph (lookalike character)',
+            'bidi': 'Bidi control (text direction attack)',
+            'zero_width': 'Zero-width invisible character',
+            'ansi_escape': 'ANSI escape sequence',
+            'control_char': 'Control character',
+            'unicode_tag': 'Unicode tag (hidden ASCII)',
+            'invisible_math': 'Invisible math operator',
+            'invisible_ws': 'Invisible whitespace',
+            'hangul_filler': 'Hangul filler',
+            'math_symbol': 'Math alphanumeric symbol',
+            'variation_selector': 'Variation selector',
+            'hidden_multiline': 'Hidden multiline command',
+            'line_separator': 'Hidden line separator',
+            'deprecated_format': 'Deprecated format character',
+            'interlinear': 'Interlinear annotation (hidden text)',
+            'soft_hyphen': 'Soft hyphen (invisible)',
+            'word_joiner': 'Word joiner (invisible)',
+            'combining_grapheme': 'Combining grapheme joiner',
+            'object_replacement': 'Object replacement character',
+            'zalgo': 'Excessive combining marks (zalgo)',
+            'private_use': 'Private Use Area character',
         }
 
-        details = []
+        # Build secondary text with proper Pango markup
+        markup_parts = []
         seen_cats = set()
         for t in threats[:15]:
             cat_label = cat_names.get(t.category, t.category)
             if t.category not in seen_cats:
-                details.append(f"\n<b>{GLib.markup_escape_text(cat_label)}</b>")
+                markup_parts.append(
+                    f"\n<b>{GLib.markup_escape_text(cat_label)}</b>")
                 seen_cats.add(t.category)
-            details.append(f"  {t.codepoint}: {GLib.markup_escape_text(t.description)}")
+            desc_escaped = GLib.markup_escape_text(t.description)
+            markup_parts.append(
+                f"  <tt>{GLib.markup_escape_text(t.codepoint)}</tt>: {desc_escaped}")
 
         if len(threats) > 15:
-            details.append(f"\n  ... and {len(threats) - 15} more")
+            markup_parts.append(f"\n  <i>...and {len(threats) - 15} more</i>")
 
         preview = text[:200] + ("..." if len(text) > 200 else "")
+        preview_escaped = GLib.markup_escape_text(preview)
 
-        dialog.format_secondary_markup(
-            f"{GLib.markup_escape_text(chr(10).join(details))}\n\n"
-            f"<b>Text preview:</b>\n"
-            f"<tt>{GLib.markup_escape_text(preview)}</tt>"
+        secondary = (
+            "\n".join(markup_parts)
+            + f"\n\n<b>Text preview:</b>\n<tt>{preview_escaped}</tt>"
         )
+
+        dialog.format_secondary_markup(secondary)
 
         dialog.add_button("Cancel Paste", Gtk.ResponseType.CANCEL)
         dialog.add_button("Paste Anyway", Gtk.ResponseType.ACCEPT)
