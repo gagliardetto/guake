@@ -385,7 +385,13 @@ class BlockOverlay:
 
             # Background tint for failed blocks (skip expected exit codes
             # and blocks with huge output like SSH/vim that take over the terminal)
+            # Also skip the most recent completed block if a new command is running
+            # (user has moved on — don't tint the area their new output is filling)
             if block.exit_code and block.exit_code != 0:
+                if self.block_model._current_block and self.block_model._current_block.command:
+                    # A new command is running — skip tint for the last completed block
+                    if block == self.block_model.blocks[-2] if len(self.block_model.blocks) >= 2 else False:
+                        continue
                 # 130 = Ctrl+C, 255 = SSH, 126/127 = not found, 128+N = signal
                 if block.exit_code not in (126, 127, 130, 255) and block.exit_code < 128:
                     output_lines = block.end_row - (block.command_row or block.prompt_row)
