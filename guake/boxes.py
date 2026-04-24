@@ -393,6 +393,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             from guake.inline_editor import InlineEditor
 
             self.block_model = BlockModel(terminal)
+            self._blocks_terminal_uuid = str(terminal.uuid)
             log.info("BlockModel created for terminal %s", terminal.uuid)
 
             # Block overlay — draws directly on the terminal's draw signal
@@ -475,11 +476,10 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
-        if not hasattr(self, '_first_event_logged'):
-            log.info("First block event received: %s (events are flowing!)", event_type)
-            self._first_event_logged = True
-        else:
-            log.debug("Block event received: %s", event_type)
+        log.info("Block event: %s (terminal %s, block cmd=%s)",
+                 event_type,
+                 getattr(self, '_blocks_terminal_uuid', '?'),
+                 getattr(self.block_model._current_block, 'command', None) if self.block_model._current_block else None)
         # Update tab label with command status
         self._update_tab_command_status(event_type)
 
@@ -514,6 +514,14 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         tab_label = notebook.get_tab_label(self)
 
         current = self.block_model._current_block
+
+        # Update tab label
+        has_method = tab_label and hasattr(tab_label, 'set_running_command')
+        if event_type in ("command_start", "command_end"):
+            log.info("Tab update: event=%s page=%d has_method=%s cmd=%s label_type=%s",
+                     event_type, page_num, has_method,
+                     current.command if current else None,
+                     type(tab_label).__name__)
 
         # Update tab label
         if tab_label and hasattr(tab_label, 'set_running_command'):
