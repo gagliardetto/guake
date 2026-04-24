@@ -322,7 +322,7 @@ class TerminalNotebook(Gtk.Notebook):
         self.popover_window = None
         self.tab_selection_button.connect("clicked", self.on_tab_selection)
 
-        self.action_box = Gtk.Box(visible=True)
+        self.action_box = Gtk.Box(visible=True, spacing=2)
         self.action_box.pack_start(self.pin_button, 0, 0, 0)
         self.action_box.pack_start(self.new_page_button, 0, 0, 0)
         self.action_box.pack_start(self.tab_selection_button, 0, 0, 0)
@@ -332,6 +332,72 @@ class TerminalNotebook(Gtk.Notebook):
         self.workspace_indicator.set_margin_start(10)
         self.workspace_indicator.show()
         self.set_action_widget(self.workspace_indicator, Gtk.PackType.START)
+
+        # -- Modern tab CSS --
+        css = Gtk.CssProvider()
+        css.load_from_data(b"""
+            #notebook-teminals {
+                background-color: rgba(24, 26, 30, 0.97);
+            }
+            #notebook-teminals header.bottom {
+                background-color: rgba(24, 26, 30, 0.97);
+                border-top: 1px solid rgba(255, 255, 255, 0.06);
+                border-bottom: none;
+                padding: 2px 4px;
+            }
+            #notebook-teminals tab {
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 3px 8px;
+                margin: 2px 1px;
+                transition: background-color 150ms ease;
+                color: rgba(255, 255, 255, 0.5);
+                font-size: 9.5pt;
+            }
+            #notebook-teminals tab:hover {
+                background-color: rgba(255, 255, 255, 0.06);
+                color: rgba(255, 255, 255, 0.75);
+            }
+            #notebook-teminals tab:checked {
+                background-color: rgba(100, 160, 255, 0.15);
+                color: #6EC1E4;
+                font-weight: bold;
+            }
+            #notebook-teminals tab:checked:hover {
+                background-color: rgba(100, 160, 255, 0.20);
+            }
+            #notebook-teminals tab button {
+                opacity: 0;
+                min-width: 0;
+                min-height: 0;
+                padding: 0px 2px;
+                border-radius: 4px;
+                transition: opacity 150ms ease;
+            }
+            #notebook-teminals tab:hover button,
+            #notebook-teminals tab:checked button {
+                opacity: 0.5;
+            }
+            #notebook-teminals tab button:hover {
+                opacity: 1.0;
+                background-color: rgba(255, 80, 80, 0.3);
+            }
+            #notebook-teminals header.bottom button {
+                opacity: 0.5;
+                border-radius: 6px;
+                padding: 2px 4px;
+                min-width: 0;
+                min-height: 0;
+            }
+            #notebook-teminals header.bottom button:hover {
+                opacity: 1.0;
+                background-color: rgba(255, 255, 255, 0.08);
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
     def on_switch_page(self, notebook, page, page_num):
         self.update_all_tabs_activity()
