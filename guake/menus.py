@@ -1,7 +1,7 @@
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 from guake.customcommands import CustomCommands
 
@@ -170,6 +170,43 @@ def _add_watcher_menu_items(menu, guake, tab_label):
         menu.add(mi)
 
 
+def _validate_regex(pattern):
+    """Validate a regex pattern. Returns (compiled_re, error_string)."""
+    if not pattern:
+        return None, "Pattern is empty"
+    if len(pattern) > 500:
+        return None, "Pattern too long (max 500 chars)"
+
+    # Reject catastrophic backtracking patterns
+    import re as _re
+    danger_patterns = [
+        r'\(.*[+*].*\)[+*]',     # (a+)+ or (a*)*
+        r'\(.*\|.*\)[+*]{2,}',   # (a|b)**
+    ]
+    for dp in danger_patterns:
+        if _re.search(dp, pattern):
+            return None, "Pattern may cause catastrophic backtracking"
+
+    try:
+        compiled = _re.compile(pattern, _re.IGNORECASE)
+    except _re.error as e:
+        return None, f"Invalid regex: {e}"
+
+    # Quick sanity test — must complete fast on sample input
+    import time
+    test_input = "a" * 1000
+    start = time.monotonic()
+    try:
+        compiled.search(test_input)
+    except Exception:
+        pass
+    elapsed = time.monotonic() - start
+    if elapsed > 0.1:
+        return None, "Pattern too slow (took >100ms on test input)"
+
+    return compiled, None
+
+
 def _show_regex_dialog(guake, watcher_manager, terminal_uuid, tab_title):
     """Show a dialog to enter a regex pattern for matching."""
     from guake.notifications import RegexWatcher
@@ -180,8 +217,9 @@ def _show_regex_dialog(guake, watcher_manager, terminal_uuid, tab_title):
         modal=True,
     )
     dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
-    dialog.add_button("Add Watcher", Gtk.ResponseType.ACCEPT)
+    add_btn = dialog.add_button("Add Watcher", Gtk.ResponseType.ACCEPT)
     dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+    add_btn.set_sensitive(False)
 
     content = dialog.get_content_area()
     content.set_spacing(8)
@@ -198,10 +236,25 @@ def _show_regex_dialog(guake, watcher_manager, terminal_uuid, tab_title):
     entry.set_activates_default(True)
     content.add(entry)
 
-    hint = Gtk.Label(label="Python regex, case-insensitive")
-    hint.set_xalign(0)
-    hint.get_style_context().add_class("dim-label")
-    content.add(hint)
+    status_label = Gtk.Label(label="")
+    status_label.set_xalign(0)
+    content.add(status_label)
+
+    def _on_changed(entry):
+        pattern = entry.get_text().strip()
+        if not pattern:
+            status_label.set_text("")
+            add_btn.set_sensitive(False)
+            return
+        _, err = _validate_regex(pattern)
+        if err:
+            status_label.set_markup(f'<span color="#E01B24">{GLib.markup_escape_text(err)}</span>')
+            add_btn.set_sensitive(False)
+        else:
+            status_label.set_markup('<span color="#26A269">✓ Valid pattern</span>')
+            add_btn.set_sensitive(True)
+
+    entry.connect("changed", _on_changed)
 
     dialog.show_all()
     response = dialog.run()
@@ -209,7 +262,9 @@ def _show_regex_dialog(guake, watcher_manager, terminal_uuid, tab_title):
     dialog.destroy()
 
     if response == Gtk.ResponseType.ACCEPT and pattern:
-        watcher_manager.add(RegexWatcher(terminal_uuid, pattern, tab_title))
+        compiled, err = _validate_regex(pattern)
+        if compiled:
+            watcher_manager.add(RegexWatcher(terminal_uuid, pattern, tab_title))
 
 
 def mk_notebook_context_menu(callback_object):
