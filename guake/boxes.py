@@ -438,9 +438,43 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             else:
                 log.warning("No block_fifo_path on terminal %s — shell integration won't work", terminal.uuid)
 
+            # Wire terminal output to regex watchers
+            self._last_cursor_row = 0
+            terminal.connect("contents-changed", self._on_terminal_contents_changed)
+
             log.info("Block support initialized for terminal %s (mode=%s)", terminal.uuid, self._editor_mode)
         except Exception as e:
             log.warning("Could not initialize block support: %s", e, exc_info=True)
+
+    def _on_terminal_contents_changed(self, terminal):
+        """Forward new terminal output to regex watchers."""
+        guake = self.get_guake()
+        if not guake or not hasattr(guake, 'notification_center'):
+            return
+        wm = guake.notification_center.watcher_manager
+        # Quick check: any regex watchers for this terminal?
+        tuuid = self._blocks_terminal_uuid
+        if not any(hasattr(w, 'compiled') and w.terminal_uuid == tuuid
+                   for w in wm.watchers):
+            return
+
+        # Get cursor position and read new lines
+        try:
+            col, row = terminal.get_cursor_position()
+            if row <= self._last_cursor_row:
+                self._last_cursor_row = row
+                return
+            # Read text from last known row to current row
+            text = terminal.get_text_range(
+                self._last_cursor_row, 0, row, -1, None)[0]
+            self._last_cursor_row = row
+            if text and text.strip():
+                nb = self.get_notebook()
+                tab_label = nb.get_tab_label(self) if nb else None
+                tab_title = tab_label.get_text() if tab_label and hasattr(tab_label, 'get_text') else ""
+                wm.on_terminal_output(tuuid, text.strip(), tab_title)
+        except Exception:
+            pass  # VTE API can throw during rapid updates
 
     def _on_terminal_motion(self, terminal, event):
         """Detect mouse at bottom edge of terminal to reveal inline editor."""
