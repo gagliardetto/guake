@@ -653,10 +653,58 @@ class GuakeTerminal(Vte.Terminal):
         dialog.format_secondary_markup(secondary)
 
         dialog.add_button("Cancel Paste", Gtk.ResponseType.CANCEL)
-        dialog.add_button("Paste Anyway", Gtk.ResponseType.ACCEPT)
+
+        # Hold-to-confirm button — must press and hold for 5 seconds
+        hold_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        hold_btn = Gtk.Button(label="Hold to Paste (5s)")
+        hold_btn.set_size_request(180, -1)
+        progress = Gtk.ProgressBar()
+        progress.set_size_request(180, 8)
+        progress.set_fraction(0)
+        hold_box.pack_start(hold_btn, False, False, 0)
+        hold_box.pack_start(progress, False, False, 0)
+        hold_box.show_all()
+
+        action_area = dialog.get_action_area()
+        action_area.pack_end(hold_box, False, False, 0)
+
+        hold_data = {'timer': None, 'elapsed': 0}
+        HOLD_MS = 5000
+        TICK_MS = 50
+
+        def _on_tick():
+            hold_data['elapsed'] += TICK_MS
+            frac = min(hold_data['elapsed'] / HOLD_MS, 1.0)
+            progress.set_fraction(frac)
+            remaining = max(0, (HOLD_MS - hold_data['elapsed']) // 1000)
+            hold_btn.set_label(f"Hold to Paste ({remaining}s)")
+            if frac >= 1.0:
+                hold_data['timer'] = None
+                dialog.response(Gtk.ResponseType.ACCEPT)
+                return False
+            return True
+
+        def _on_press(w, event):
+            hold_data['elapsed'] = 0
+            progress.set_fraction(0)
+            hold_data['timer'] = GLib.timeout_add(TICK_MS, _on_tick)
+
+        def _on_release(w, event):
+            if hold_data['timer']:
+                GLib.source_remove(hold_data['timer'])
+                hold_data['timer'] = None
+            hold_data['elapsed'] = 0
+            progress.set_fraction(0)
+            hold_btn.set_label("Hold to Paste (5s)")
+
+        hold_btn.connect("button-press-event", _on_press)
+        hold_btn.connect("button-release-event", _on_release)
+
         dialog.set_default_response(Gtk.ResponseType.CANCEL)
 
         response = dialog.run()
+        if hold_data['timer']:
+            GLib.source_remove(hold_data['timer'])
         dialog.destroy()
         return response == Gtk.ResponseType.ACCEPT
 
