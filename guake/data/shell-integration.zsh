@@ -3,15 +3,18 @@
 # Compatible with: Powerlevel10k, oh-my-zsh, prezto, vanilla zsh
 # Provides: command blocks, inline editor support, exit code tracking
 
-if [[ "$GUAKE_SHELL_INTEGRATION" == "1" ]]; then
-    return 0
-fi
-export GUAKE_SHELL_INTEGRATION=1
-
 # Bail if not running inside Guake (no FIFO path set)
 if [[ -z "$GUAKE_BLOCK_FIFO" || ! -p "$GUAKE_BLOCK_FIFO" ]]; then
     return 0
 fi
+
+# Only skip if hooks are ACTUALLY still registered (p10k can wipe them)
+if [[ "$GUAKE_SHELL_INTEGRATION" == "1" ]] && \
+   [[ ${preexec_functions[(Ie)_guake_preexec]} -gt 0 ]] && \
+   [[ ${precmd_functions[(Ie)_guake_precmd]} -gt 0 ]]; then
+    return 0
+fi
+export GUAKE_SHELL_INTEGRATION=1
 
 _guake_emit() {
     # Write a JSON event line to the FIFO (non-blocking, ignore errors)
@@ -53,9 +56,9 @@ _guake_preexec() {
     _guake_emit "{\"event\":\"command_start\",\"command\":\"$cmd\"}"
 }
 
-# Install hooks — append directly to arrays (more robust than add-zsh-hook)
-precmd_functions+=(_guake_precmd)
-preexec_functions+=(_guake_preexec)
+# Install hooks — check first to prevent duplicates on re-source
+[[ ${precmd_functions[(Ie)_guake_precmd]} -eq 0 ]] && precmd_functions+=(_guake_precmd)
+[[ ${preexec_functions[(Ie)_guake_preexec]} -eq 0 ]] && preexec_functions+=(_guake_preexec)
 
 # Watchdog: use DEBUG trap to re-install hooks after p10k deferred init
 # The trap fires once, re-installs if needed, then removes itself.
