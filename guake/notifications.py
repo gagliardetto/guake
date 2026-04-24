@@ -168,7 +168,7 @@ class WatcherManager:
 # ############################################################################
 
 class NotificationCenter:
-    """Drawer UI that shows notifications with a badge counter."""
+    """Floating popup that shows notifications with a badge counter."""
 
     def __init__(self, guake_app):
         self.guake = guake_app
@@ -186,29 +186,36 @@ class NotificationCenter:
         self._bell_badge = Gtk.Label(label="")
         self._bell_badge.get_style_context().add_class("notification-badge")
         self._bell_badge.set_no_show_all(True)
+        self._bell_badge.set_halign(Gtk.Align.END)
+        self._bell_badge.set_valign(Gtk.Align.START)
 
         bell_overlay = Gtk.Overlay()
         bell_overlay.add(self._bell_icon)
         bell_overlay.add_overlay(self._bell_badge)
         self.bell_button.add(bell_overlay)
-        self.bell_button.connect("clicked", self._toggle_drawer)
+        self.bell_button.connect("clicked", self._toggle_popup)
         self.bell_button.set_tooltip_text("Notifications")
 
-        # -- Drawer panel --
-        self._drawer = Gtk.Revealer()
-        self._drawer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_LEFT)
-        self._drawer.set_transition_duration(200)
+        # -- Popup window --
+        self._popup = Gtk.Window(type=Gtk.WindowType.POPUP)
+        self._popup.set_decorated(False)
+        self._popup.set_skip_taskbar_hint(True)
+        self._popup.set_skip_pager_hint(True)
+        self._popup.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
 
-        drawer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        drawer_box.get_style_context().add_class("notification-drawer")
-        drawer_box.set_size_request(300, -1)
+        frame = Gtk.Frame()
+        frame.get_style_context().add_class("notification-popup")
+        self._popup.add(frame)
+
+        popup_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        frame.add(popup_box)
 
         # Header
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        header.set_margin_top(8)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.set_margin_top(10)
         header.set_margin_bottom(6)
-        header.set_margin_start(12)
-        header.set_margin_end(8)
+        header.set_margin_start(14)
+        header.set_margin_end(10)
 
         title = Gtk.Label(label="Notifications")
         title.get_style_context().add_class("notification-title")
@@ -216,52 +223,57 @@ class NotificationCenter:
         title.set_hexpand(True)
         header.pack_start(title, True, True, 0)
 
-        mark_all = Gtk.Button(label="Mark all seen", relief=Gtk.ReliefStyle.NONE)
-        mark_all.get_style_context().add_class("toolbar-btn")
+        mark_all = Gtk.Button(label="Mark all read", relief=Gtk.ReliefStyle.NONE)
+        mark_all.get_style_context().add_class("notif-action-btn")
         mark_all.connect("clicked", lambda w: self._mark_all_seen())
         header.pack_end(mark_all, False, False, 0)
 
         clear_btn = Gtk.Button(label="Clear", relief=Gtk.ReliefStyle.NONE)
-        clear_btn.get_style_context().add_class("toolbar-btn")
+        clear_btn.get_style_context().add_class("notif-action-btn")
         clear_btn.connect("clicked", lambda w: self._clear_all())
         header.pack_end(clear_btn, False, False, 0)
 
-        drawer_box.pack_start(header, False, False, 0)
-        drawer_box.pack_start(Gtk.Separator(), False, False, 0)
+        popup_box.pack_start(header, False, False, 0)
+        popup_box.pack_start(Gtk.Separator(), False, False, 0)
 
         # Notification list
         self._scroll = Gtk.ScrolledWindow()
         self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self._scroll.set_vexpand(True)
+        self._scroll.set_min_content_height(100)
+        self._scroll.set_max_content_height(400)
+        self._scroll.set_propagate_natural_height(True)
 
         self._listbox = Gtk.ListBox()
         self._listbox.set_selection_mode(Gtk.SelectionMode.NONE)
         self._scroll.add(self._listbox)
-        drawer_box.pack_start(self._scroll, True, True, 0)
+        popup_box.pack_start(self._scroll, True, True, 0)
 
         # Empty state
-        self._empty_label = Gtk.Label(label="No notifications")
+        self._empty_label = Gtk.Label(label="No notifications yet")
         self._empty_label.get_style_context().add_class("notification-empty")
-        self._empty_label.set_margin_top(40)
-        drawer_box.pack_start(self._empty_label, False, False, 0)
+        self._empty_label.set_margin_top(30)
+        self._empty_label.set_margin_bottom(30)
+        popup_box.pack_start(self._empty_label, False, False, 0)
 
         # Active watchers section
         self._watchers_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        drawer_box.pack_end(self._watchers_box, False, False, 0)
+        popup_box.pack_end(self._watchers_box, False, False, 0)
 
-        self._drawer.add(drawer_box)
+        self._popup.set_size_request(360, -1)
+        self._popup.connect("focus-out-event", lambda w, e: self._hide_popup())
 
         # CSS
         css = Gtk.CssProvider()
         css.load_from_data(b"""
-            .notification-drawer {
+            .notification-popup {
                 background-color: rgba(24, 26, 32, 0.98);
-                border-left: 1px solid rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(100, 160, 255, 0.2);
+                border-radius: 10px;
             }
             .notification-title {
                 font-weight: bold;
-                font-size: 11pt;
-                color: rgba(255, 255, 255, 0.7);
+                font-size: 12pt;
+                color: rgba(255, 255, 255, 0.8);
             }
             .notification-bell {
                 opacity: 0.5;
@@ -287,30 +299,42 @@ class NotificationCenter:
                 min-width: 12px;
                 min-height: 12px;
             }
+            .notif-action-btn {
+                opacity: 0.5;
+                font-size: 9pt;
+                padding: 2px 8px;
+                border-radius: 4px;
+                min-width: 0;
+                min-height: 0;
+            }
+            .notif-action-btn:hover {
+                opacity: 1.0;
+                background-color: rgba(255, 255, 255, 0.08);
+            }
             .notification-empty {
                 color: rgba(255, 255, 255, 0.2);
                 font-size: 10pt;
             }
             .notification-row {
-                padding: 8px 12px;
+                padding: 8px 14px;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.04);
             }
             .notification-row-seen {
-                opacity: 0.5;
+                opacity: 0.45;
             }
             .notification-row-title {
                 color: rgba(255, 255, 255, 0.9);
-                font-size: 9.5pt;
+                font-size: 10pt;
                 font-weight: bold;
             }
             .notification-row-body {
                 color: rgba(255, 255, 255, 0.5);
-                font-size: 8.5pt;
+                font-size: 9pt;
                 font-family: Monospace;
             }
             .notification-row-meta {
                 color: rgba(255, 255, 255, 0.25);
-                font-size: 8pt;
+                font-size: 8.5pt;
             }
             .notification-type-cmd-complete .notification-row-title {
                 color: #6EC1E4;
@@ -320,14 +344,16 @@ class NotificationCenter:
             }
             .watcher-section {
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
-                padding: 6px 12px;
+                padding: 8px 14px;
             }
             .watcher-label {
-                font-size: 8pt;
-                color: rgba(255, 255, 255, 0.35);
+                font-size: 8.5pt;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.3);
+                letter-spacing: 1px;
             }
             .watcher-item {
-                font-size: 8.5pt;
+                font-size: 9pt;
                 color: rgba(255, 255, 255, 0.5);
                 padding: 2px 0;
             }
@@ -336,20 +362,14 @@ class NotificationCenter:
             Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-    @property
-    def widget(self):
-        """The drawer widget to pack into the main UI."""
-        return self._drawer
-
     def add_notification(self, notification):
         """Add a notification and update the UI."""
         self.notifications.insert(0, notification)
-        # Limit to 100 notifications
         if len(self.notifications) > 100:
             self.notifications = self.notifications[:100]
         self._update_badge()
-        self._rebuild_list()
-        # Desktop notification
+        if self._popup.get_visible():
+            self._rebuild_list()
         self._send_desktop_notification(notification)
 
     def _send_desktop_notification(self, n):
@@ -376,13 +396,33 @@ class NotificationCenter:
             self._bell_badge.hide()
             self.bell_button.get_style_context().remove_class("notification-bell-active")
 
-    def _toggle_drawer(self, widget=None):
-        """Open/close the notification drawer."""
-        is_open = self._drawer.get_reveal_child()
-        self._drawer.set_reveal_child(not is_open)
-        if not is_open:
-            self._rebuild_list()
-            self._rebuild_watchers()
+    def _toggle_popup(self, widget=None):
+        """Show/hide the notification popup anchored to the bell button."""
+        if self._popup.get_visible():
+            self._hide_popup()
+        else:
+            self._show_popup()
+
+    def _show_popup(self):
+        """Position and show the popup near the bell button."""
+        self._rebuild_list()
+        self._rebuild_watchers()
+
+        # Position near the bell button
+        parent = self.guake.window
+        _, px, py = parent.get_window().get_origin()
+        parent_alloc = parent.get_allocation()
+
+        # Anchor top-right area of the window
+        x = px + parent_alloc.width - 380
+        y = py + 40
+
+        self._popup.move(x, y)
+        self._popup.show_all()
+        self._update_badge()
+
+    def _hide_popup(self):
+        self._popup.hide()
 
     def _mark_all_seen(self):
         for n in self.notifications:
