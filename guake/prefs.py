@@ -741,6 +741,136 @@ class PrefsDialog(SimpleGladeApp):
         self.load_configs()
         self.get_widget("config-window").hide()
 
+        # Add UI Customization tab
+        self._add_ui_config_tab()
+
+    def _add_ui_config_tab(self):
+        """Add a 'UI Customization' tab to the preferences notebook."""
+        import json
+        from guake.ui_config import get as ui, _DEFAULTS
+
+        notebook = self.get_widget("tabs")
+        if not notebook:
+            return
+
+        config_path = os.path.join(
+            os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+            "guake", "ui_config.json"
+        )
+
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        page.set_margin_top(12)
+        page.set_margin_bottom(12)
+        page.set_margin_start(16)
+        page.set_margin_end(16)
+
+        header = Gtk.Label(xalign=0)
+        header.set_markup("<b>UI Customization</b>")
+        page.pack_start(header, False, False, 0)
+
+        desc = Gtk.Label(xalign=0)
+        desc.set_markup(
+            "<small>Font sizes and layout. Changes take effect on restart.</small>"
+        )
+        page.pack_start(desc, False, False, 4)
+        page.pack_start(Gtk.Separator(), False, False, 4)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(12)
+        grid.set_row_spacing(6)
+
+        sections = [
+            ("Sidebar", [
+                ("sidebar_font_size", "Workspace name size"),
+                ("sidebar_header_font_size", "Header size"),
+                ("sidebar_badge_font_size", "Badge size"),
+                ("sidebar_section_font_size", "Section header size"),
+            ]),
+            ("Tabs", [
+                ("tab_title_font_size", "Tab title size"),
+                ("tab_command_font_size", "Command text size"),
+                ("tab_status_font_size", "Status badge size"),
+                ("tab_max_chars", "Tab title max chars"),
+                ("tab_cmd_max_chars", "Command max chars"),
+            ]),
+        ]
+
+        self._ui_spinners = {}
+        row = 0
+
+        for section_name, fields in sections:
+            section_label = Gtk.Label(xalign=0)
+            section_label.set_markup(f"\n<b>{section_name}</b>")
+            grid.attach(section_label, 0, row, 2, 1)
+            row += 1
+
+            for key, label_text in fields:
+                label = Gtk.Label(label=label_text, xalign=0)
+                label.set_hexpand(True)
+                grid.attach(label, 0, row, 1, 1)
+
+                current_val = ui(key)
+                default_val = _DEFAULTS[key]
+                is_int = isinstance(default_val, int)
+
+                if is_int:
+                    adj = Gtk.Adjustment(value=current_val, lower=4, upper=100, step_increment=1)
+                    spinner = Gtk.SpinButton(adjustment=adj, digits=0)
+                else:
+                    adj = Gtk.Adjustment(value=current_val, lower=4.0, upper=30.0, step_increment=0.5)
+                    spinner = Gtk.SpinButton(adjustment=adj, digits=1)
+
+                spinner.set_tooltip_text(f"Default: {default_val}")
+                grid.attach(spinner, 1, row, 1, 1)
+                self._ui_spinners[key] = spinner
+                row += 1
+
+        page.pack_start(grid, False, False, 0)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_box.set_margin_top(12)
+
+        save_btn = Gtk.Button(label="Save (restart to apply)")
+        save_btn.connect("clicked", lambda w: self._save_ui_config(config_path))
+        btn_box.pack_start(save_btn, False, False, 0)
+
+        reset_btn = Gtk.Button(label="Reset to Defaults")
+        reset_btn.connect("clicked", lambda w: self._reset_ui_config(config_path))
+        btn_box.pack_start(reset_btn, False, False, 0)
+
+        page.pack_start(btn_box, False, False, 0)
+
+        tab_label = Gtk.Label(label="UI")
+        notebook.append_page(page, tab_label)
+        page.show_all()
+
+    def _save_ui_config(self, config_path):
+        """Save UI config values to disk."""
+        import json
+        config = {}
+        for key, spinner in self._ui_spinners.items():
+            val = spinner.get_value()
+            config[key] = int(val) if spinner.get_digits() == 0 else round(val, 1)
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+        log.info("UI config saved to %s", config_path)
+        from guake import ui_config
+        ui_config.reload()
+
+    def _reset_ui_config(self, config_path):
+        """Reset all spinners to defaults."""
+        from guake.ui_config import _DEFAULTS
+        for key, spinner in self._ui_spinners.items():
+            spinner.set_value(_DEFAULTS[key])
+        try:
+            if os.path.exists(config_path):
+                os.unlink(config_path)
+        except OSError:
+            pass
+        from guake import ui_config
+        ui_config.reload()
+
     def spawn_sync_pid(self, directory=None, terminal=None):
         argv = []
         user_shell = self.settings.general.get_string("default-shell")
