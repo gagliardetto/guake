@@ -128,23 +128,11 @@ class GuakeTerminal(Vte.Terminal):
 
         # Block model FIFO for shell integration
         self.block_fifo_path = None
-        self._shell_integration_cmd = None
         try:
             from guake.blocks import create_block_fifo
             self.block_fifo_path = create_block_fifo(str(self.uuid))
             if self.block_fifo_path:
                 self.envv.append(f"GUAKE_BLOCK_FIFO={self.block_fifo_path}")
-                # Find shell integration scripts
-                import guake as guake_pkg
-                data_dir = os.path.join(os.path.dirname(guake_pkg.__file__), "data")
-                bash_script = os.path.join(data_dir, "shell-integration.bash")
-                zsh_script = os.path.join(data_dir, "shell-integration.zsh")
-                # Determine which shell will be used
-                shell = os.environ.get("SHELL", "/bin/bash")
-                if "zsh" in shell and os.path.exists(zsh_script):
-                    self._shell_integration_cmd = f'source "{zsh_script}" 2>/dev/null'
-                elif os.path.exists(bash_script):
-                    self._shell_integration_cmd = f'source "{bash_script}" 2>/dev/null'
         except Exception as e:
             log.warning("Could not create block FIFO: %s", e)
 
@@ -668,28 +656,8 @@ class GuakeTerminal(Vte.Terminal):
             libutempter.utempter_add_record(self.get_pty().get_fd(), os.uname()[1])
         self.pid = pid
 
-        # Auto-source shell integration after the shell is ready
-        # Delay 2000ms to run AFTER p10k/oh-my-zsh finish deferred init
-        if self._shell_integration_cmd:
-            cmd = self._shell_integration_cmd
-            def _auto_source():
-                try:
-                    self.feed_child(cmd + "\n")
-                    log.info("Auto-sourced shell integration: %s", cmd[:80])
-                except Exception as e:
-                    log.warning("Auto-source feed_child failed: %s, trying PTY write", e)
-                    try:
-                        pty = self.get_pty()
-                        if pty:
-                            fd = pty.get_fd()
-                            os.write(fd, (cmd + "\n").encode())
-                            log.info("Auto-sourced via PTY fd %d", fd)
-                    except Exception as e2:
-                        log.warning("Auto-source PTY write also failed: %s", e2)
-                return False
-            GLib.timeout_add(2000, _auto_source)
-
-            # Also ensure shell integration is in .zshrc/.bashrc for persistence
+        # Auto-add shell integration to .zshrc/.bashrc (one-time, persists)
+        if self.block_fifo_path:
             self._ensure_shell_integration_in_rc()
 
         return pid
