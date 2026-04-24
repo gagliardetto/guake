@@ -358,6 +358,15 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         if not self._blocks_initialized and terminal:
             self._setup_blocks(terminal)
 
+    def ensure_blocks_initialized(self):
+        """Eagerly initialize block support if a terminal is available.
+        Called after the page is fully set up and visible."""
+        if self._blocks_initialized:
+            return
+        terminals = list(self.iter_terminals())
+        if terminals:
+            self._setup_blocks(terminals[0])
+
     def _setup_blocks(self, terminal):
         """Initialize block model, overlay, and inline editor for this terminal.
         Called once when the first terminal gets focus."""

@@ -781,10 +781,10 @@ class TerminalNotebook(Gtk.Notebook):
             )
             if not empty:
                 self.terminal_attached(terminal)
-                # Explicitly grab focus now that the terminal is in the tree
-                # and visible. This triggers on_terminal_focus → _setup_blocks
-                # which initializes block support and the inline editor.
                 terminal.grab_focus()
+                # Eagerly initialize block support (FIFO reader, inline editor)
+                # now that the terminal is in the tree and visible
+                root_terminal_box.ensure_blocks_initialized()
             self.hide_tabbar_if_one_tab()
             self.update_all_tabs_activity()
 

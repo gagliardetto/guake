@@ -1413,6 +1413,9 @@ class Guake(SimpleGladeApp):
             for page in pages_in_ws_ordered:
                 page.set_no_show_all(False)
                 page.show_all()
+                # Initialize blocks for pages that were created in quiet mode
+                if hasattr(page, 'ensure_blocks_initialized'):
+                    page.ensure_blocks_initialized()
 
             # Determine which page to focus
             page_to_focus = None
