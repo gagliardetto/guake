@@ -889,6 +889,25 @@ class WorkspaceManager:
         active_id = self.workspaces_data.get("active_workspace")
         return self.get_workspace_by_id(active_id) if active_id else None
 
+    def select_workspace_row(self, workspace_id):
+        """Programmatically select the sidebar row for a workspace and update styling."""
+        if not hasattr(self, 'workspace_listbox'):
+            return
+        for row in self.workspace_listbox.get_children():
+            if row.get_name() == workspace_id:
+                self.workspace_listbox.select_row(row)
+            # Update active styling (cyan name vs normal)
+            box = row.get_child()
+            if box:
+                for child in box.get_children():
+                    if hasattr(child, 'get_style_context'):
+                        ctx = child.get_style_context()
+                        if ctx.has_class("ws-name") or ctx.has_class("ws-name-active"):
+                            if row.get_name() == workspace_id:
+                                ctx.add_class("ws-name-active")
+                            else:
+                                ctx.remove_class("ws-name-active")
+
     @save_tabs_when_changed
     def on_add_workspace(self, widget=None, activate=False):
         """Adds a new workspace to the data and UI."""

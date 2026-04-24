@@ -1398,8 +1398,13 @@ class Guake(SimpleGladeApp):
             
             if self.page_reorder_handler_id:
                 notebook.handler_unblock(self.page_reorder_handler_id)
-        
+
+        # Update the active workspace in the data model BEFORE updating the indicator
+        self.workspace_manager.workspaces_data["active_workspace"] = workspace_id
         self.update_active_workspace_indicator()
+        # Update sidebar selection to match
+        if hasattr(self.workspace_manager, 'select_workspace_row'):
+            self.workspace_manager.select_workspace_row(workspace_id)
 
     def update_active_workspace_indicator(self):
         if self.workspace_manager:
