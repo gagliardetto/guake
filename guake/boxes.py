@@ -442,6 +442,9 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
+        # Update tab label with command status
+        self._update_tab_command_status(event_type)
+
         if event_type == "prompt_start":
             self._input_phase = True
             if self.inline_editor:
@@ -461,6 +464,29 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         elif event_type == "command_end":
             if self.block_overlay:
                 self.block_overlay.refresh()
+
+    def _update_tab_command_status(self, event_type):
+        """Push block event info to the tab label."""
+        notebook = self.get_notebook()
+        if not notebook or not self.block_model:
+            return
+        page_num = notebook.page_num(self)
+        if page_num < 0:
+            return
+        tab_label = notebook.get_tab_label(self)
+        if not tab_label or not hasattr(tab_label, 'set_running_command'):
+            return
+
+        current = self.block_model._current_block
+        if event_type == "command_start" and current:
+            tab_label.set_running_command(current.command or "")
+        elif event_type == "command_end" and current:
+            tab_label.set_command_result(
+                current.command or "",
+                current.exit_code if current.exit_code is not None else 0)
+        elif event_type == "prompt_start":
+            # Keep showing the last result, don't clear
+            pass
 
     def _cleanup_blocks(self):
         """Clean up block support resources."""
@@ -1091,22 +1117,110 @@ class TabLabelEventBox(Gtk.EventBox):
     def __init__(self, notebook, text, settings):
         super().__init__()
         self.notebook = notebook
-        self.box = Gtk.Box(homogeneous=Gtk.Orientation.HORIZONTAL, spacing=0, visible=True)
+
+        # Two-line vertical layout
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, visible=True)
+
+        # Top line: title
         self.label = Gtk.Label(label=text, visible=True)
+        self.label.set_xalign(0)
         self.label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.label.set_max_width_chars(20)
+        self.label.set_max_width_chars(18)
+        self.label.get_style_context().add_class("tab-title")
+        self.box.pack_start(self.label, False, False, 0)
+
+        # Bottom line: command + status
+        self._cmd_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3, visible=True)
+        self._cmd_label = Gtk.Label(label="", visible=True)
+        self._cmd_label.set_xalign(0)
+        self._cmd_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._cmd_label.set_max_width_chars(16)
+        self._cmd_label.get_style_context().add_class("tab-cmd")
+
+        self._status_label = Gtk.Label(label="", visible=False)
+        self._status_label.get_style_context().add_class("tab-status")
+
+        self._spinner = Gtk.Spinner()
+        self._spinner.set_size_request(10, 10)
+        self._spinner.set_no_show_all(True)
+
+        self._cmd_box.pack_start(self._cmd_label, True, True, 0)
+        self._cmd_box.pack_end(self._status_label, False, False, 0)
+        self._cmd_box.pack_end(self._spinner, False, False, 0)
+        self.box.pack_start(self._cmd_box, False, False, 0)
+
+        # Close button (overlaid top-right)
+        overlay = Gtk.Overlay()
+        overlay.add(self.box)
+
         self.close_button = Gtk.Button(
             image=Gtk.Image.new_from_icon_name("window-close", Gtk.IconSize.MENU),
             relief=Gtk.ReliefStyle.NONE,
         )
+        self.close_button.set_halign(Gtk.Align.END)
+        self.close_button.set_valign(Gtk.Align.START)
         self.close_button.connect("clicked", self.on_close)
         settings.general.bind(
             "tab-close-buttons", self.close_button, "visible", Gio.SettingsBindFlags.GET
         )
-        self.box.pack_start(self.label, True, True, 0)
-        self.box.pack_end(self.close_button, False, False, 0)
-        self.add(self.box)
+        overlay.add_overlay(self.close_button)
+        overlay.set_overlay_pass_through(self.close_button, False)
+
+        self.add(overlay)
         self.connect("button-press-event", self.on_button_press, self.label)
+
+    # ---- Command status updates (called from block events) ----
+
+    def set_running_command(self, command_text):
+        """Show a running command with spinner."""
+        cmd = self._truncate_cmd(command_text)
+        self._cmd_label.set_text(cmd)
+        self._cmd_label.get_style_context().remove_class("cmd-success")
+        self._cmd_label.get_style_context().remove_class("cmd-fail")
+        self._cmd_label.get_style_context().add_class("cmd-running")
+        self._status_label.hide()
+        self._spinner.show()
+        self._spinner.start()
+
+    def set_command_result(self, command_text, exit_code):
+        """Show finished command with success/failure indicator."""
+        cmd = self._truncate_cmd(command_text)
+        self._cmd_label.set_text(cmd)
+        self._spinner.stop()
+        self._spinner.hide()
+        self._cmd_label.get_style_context().remove_class("cmd-running")
+
+        if exit_code == 0:
+            self._cmd_label.get_style_context().remove_class("cmd-fail")
+            self._cmd_label.get_style_context().add_class("cmd-success")
+            self._status_label.set_text("✓")
+            self._status_label.get_style_context().remove_class("status-fail")
+            self._status_label.get_style_context().add_class("status-ok")
+        else:
+            self._cmd_label.get_style_context().remove_class("cmd-success")
+            self._cmd_label.get_style_context().add_class("cmd-fail")
+            self._status_label.set_text(f"✗ {exit_code}")
+            self._status_label.get_style_context().remove_class("status-ok")
+            self._status_label.get_style_context().add_class("status-fail")
+        self._status_label.show()
+
+    def clear_command(self):
+        """Clear the command line (idle prompt)."""
+        self._cmd_label.set_text("")
+        self._cmd_label.get_style_context().remove_class("cmd-running")
+        self._cmd_label.get_style_context().remove_class("cmd-success")
+        self._cmd_label.get_style_context().remove_class("cmd-fail")
+        self._status_label.hide()
+        self._spinner.stop()
+        self._spinner.hide()
+
+    def _truncate_cmd(self, text):
+        """Get just the command name from a full command line."""
+        if not text:
+            return ""
+        # Take first line, first ~30 chars
+        first_line = text.split('\n')[0].strip()
+        return first_line
 
     def set_text(self, text):
         self.label.set_text(text)

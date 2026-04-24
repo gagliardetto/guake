@@ -349,35 +349,71 @@ class TerminalNotebook(Gtk.Notebook):
                 background-color: transparent;
                 border: none;
                 border-radius: 4px;
-                padding: 2px 5px;
+                padding: 2px 6px;
                 margin: 1px 0px;
                 transition: background-color 150ms ease;
-                color: rgba(255, 255, 255, 0.5);
-                font-size: 9pt;
             }
             #notebook-teminals tab:hover {
                 background-color: rgba(255, 255, 255, 0.06);
-                color: rgba(255, 255, 255, 0.75);
             }
             #notebook-teminals tab:checked {
-                background-color: rgba(100, 160, 255, 0.15);
-                color: #6EC1E4;
-                font-weight: bold;
+                background-color: rgba(100, 160, 255, 0.12);
             }
             #notebook-teminals tab:checked:hover {
-                background-color: rgba(100, 160, 255, 0.20);
+                background-color: rgba(100, 160, 255, 0.18);
             }
+
+            .tab-title {
+                font-size: 9pt;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.55);
+            }
+            #notebook-teminals tab:checked .tab-title {
+                color: #6EC1E4;
+            }
+            #notebook-teminals tab:hover .tab-title {
+                color: rgba(255, 255, 255, 0.8);
+            }
+            #notebook-teminals tab:checked:hover .tab-title {
+                color: #6EC1E4;
+            }
+
+            .tab-cmd {
+                font-size: 7.5pt;
+                color: rgba(255, 255, 255, 0.3);
+            }
+            .tab-cmd.cmd-running {
+                color: rgba(100, 180, 255, 0.7);
+            }
+            .tab-cmd.cmd-success {
+                color: rgba(38, 162, 105, 0.6);
+            }
+            .tab-cmd.cmd-fail {
+                color: rgba(224, 27, 36, 0.7);
+            }
+
+            .tab-status {
+                font-size: 7pt;
+                font-weight: bold;
+            }
+            .tab-status.status-ok {
+                color: #26A269;
+            }
+            .tab-status.status-fail {
+                color: #E01B24;
+            }
+
             #notebook-teminals tab button {
                 opacity: 0;
                 min-width: 0;
                 min-height: 0;
-                padding: 0px 2px;
-                border-radius: 4px;
+                padding: 0px;
+                border-radius: 3px;
                 transition: opacity 150ms ease;
             }
             #notebook-teminals tab:hover button,
             #notebook-teminals tab:checked button {
-                opacity: 0.5;
+                opacity: 0.4;
             }
             #notebook-teminals tab button:hover {
                 opacity: 1.0;
@@ -385,7 +421,7 @@ class TerminalNotebook(Gtk.Notebook):
             }
             #notebook-teminals header.bottom button {
                 opacity: 0.5;
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 2px 4px;
                 min-width: 0;
                 min-height: 0;
