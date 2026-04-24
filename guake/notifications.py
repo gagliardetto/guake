@@ -182,7 +182,7 @@ class NotificationCenter:
         self.bell_button = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         self.bell_button.get_style_context().add_class("notification-bell")
         self._bell_icon = Gtk.Image.new_from_icon_name(
-            "notifications-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+            "dialog-information-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
         self._bell_badge = Gtk.Label(label="")
         self._bell_badge.get_style_context().add_class("notification-badge")
         self._bell_badge.set_no_show_all(True)
@@ -232,6 +232,14 @@ class NotificationCenter:
         clear_btn.get_style_context().add_class("notif-action-btn")
         clear_btn.connect("clicked", lambda w: self._clear_all())
         header.pack_end(clear_btn, False, False, 0)
+
+        close_btn = Gtk.Button(
+            image=Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU),
+            relief=Gtk.ReliefStyle.NONE)
+        close_btn.get_style_context().add_class("notif-action-btn")
+        close_btn.set_tooltip_text("Close")
+        close_btn.connect("clicked", lambda w: self._hide_popup())
+        header.pack_end(close_btn, False, False, 0)
 
         popup_box.pack_start(header, False, False, 0)
         popup_box.pack_start(Gtk.Separator(), False, False, 0)
