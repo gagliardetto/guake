@@ -357,13 +357,10 @@ class Guake(SimpleGladeApp):
         if self.settings.general.get_boolean("restore-tabs-startup"):
             self.restore_tabs(suppress_notify=True)
 
-        # Validate and reconcile workspace data ONLY if there's no
-        # background restore pending. If there is, these run after all
-        # background tabs are loaded (in _restore_next_background_tab).
-        if not self._pending_restore_tabs:
-            all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
-            self.workspace_manager.validate_loaded_workspaces(all_uuids)
-            self.workspace_manager.reconcile_orphan_tabs()
+        # Validate and reconcile workspace data after restore
+        all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+        self.workspace_manager.validate_loaded_workspaces(all_uuids)
+        self.workspace_manager.reconcile_orphan_tabs()
 
         initial_workspace_id = self.workspace_manager.workspaces_data.get("active_workspace")
         if initial_workspace_id and self.workspace_manager.get_workspace_by_id(initial_workspace_id):
@@ -1160,8 +1157,8 @@ class Guake(SimpleGladeApp):
     def _save_tabs_now(self, filename="session.json"):
         """Immediately writes tab session data to disk."""
         self._save_tabs_timer_id = None
-        # Don't save during background tab restore — session is incomplete
-        if self._pending_restore_tabs:
+        # Don't save during session restore
+        if self.is_restoring_session:
             log.debug("Skipping tab save — background restore in progress")
             return False
         config = {"schema_version": TABS_SESSION_SCHEMA_VERSION, "timestamp": int(pytime.time()), "workspace": {}}
@@ -1224,7 +1221,7 @@ class Guake(SimpleGladeApp):
                 return any(p.get("uuid") in ws_uuids for p in tab["panes"])
             return False
 
-        # Split tabs: active workspace first, rest queued
+        # Split tabs: active workspace first, rest after
         active_tabs = []
         other_tabs = []
         for nb_key, tab in all_tabs:
@@ -1233,7 +1230,7 @@ class Guake(SimpleGladeApp):
             else:
                 other_tabs.append((nb_key, tab))
 
-        # 3. Restore active workspace tabs immediately
+        # 3. Restore ALL tabs synchronously
         self.is_restoring_session = True
         notebook = self.get_notebook()
 
@@ -1246,17 +1243,21 @@ class Guake(SimpleGladeApp):
             for _ in range(nb.get_n_pages()):
                 nb.delete_page(0)
 
-            # Restore active workspace tabs (visible, focused)
+            # Restore active workspace tabs first
             for nb_key, tab in active_tabs:
                 self._restore_single_tab(nb_key, tab, background=False)
 
+            # Restore other workspace tabs
+            for nb_key, tab in other_tabs:
+                self._restore_single_tab(nb_key, tab, background=False)
+
         except (KeyError, IndexError, TypeError) as e:
-            log.warning("Failed to restore active workspace tabs: %s", e, exc_info=True)
+            log.warning("Failed to restore tabs: %s", e, exc_info=True)
 
         self.settings.general.set_boolean("save-tabs-when-changed", v)
         self.workspace_manager.workspaces_data["active_workspace"] = active_ws_id
 
-        # 4. Show notebook and switch to active workspace immediately
+        # 4. Show notebook and switch to active workspace
         notebook.show()
         self.is_restoring_session = False
 
@@ -1268,29 +1269,11 @@ class Guake(SimpleGladeApp):
                 self.workspace_manager.workspaces_data["active_workspace"] = first_ws["id"]
                 self.switch_to_workspace(first_ws["id"])
 
-        # 5. Mark non-active workspaces as loading and queue background restore
-        if other_tabs:
-            self._pending_restore_tabs = other_tabs  # blocks saves until done
-            self._pending_restore_index = 0
-            self._pending_session_uuids = all_session_uuids
-
-            # Mark loading workspaces in sidebar
-            loading_ws_ids = set()
-            for ws_id, uuids in ws_terminal_map.items():
-                if ws_id != active_ws_id and uuids:
-                    loading_ws_ids.add(ws_id)
-            if hasattr(self.workspace_manager, 'set_loading_workspaces'):
-                self.workspace_manager.set_loading_workspaces(loading_ws_ids)
-
-            # Start incremental restore after window has settled.
-            # Each callback restores one tab then yields to the main loop.
-            GLib.timeout_add(1500, self._restore_next_background_tab)
-        else:
-            # All tabs restored, reconcile
-            if self.workspace_manager:
-                all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
-                self.workspace_manager.validate_loaded_workspaces(all_uuids)
-                self.workspace_manager.reconcile_orphan_tabs(all_session_uuids)
+        # 5. Validate and reconcile
+        if self.workspace_manager:
+            all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
+            self.workspace_manager.validate_loaded_workspaces(all_uuids)
+            self.workspace_manager.reconcile_orphan_tabs(all_session_uuids)
 
         if self.settings.general.get_boolean("restore-tabs-notify") and not suppress_notify:
             notifier.showMessage("Guake Terminal", "Your tabs have been restored!", pixmapfile("guake-notification.png"))
@@ -1313,37 +1296,6 @@ class Guake(SimpleGladeApp):
                 terminal.grab_focus()
 
         return box, page_num, terminal
-
-    def _restore_next_background_tab(self):
-        """Restore one background tab then yield to the main loop.
-        Uses timeout_add (not idle_add) to space out tab creation
-        and prevent UI freezing or animation replays."""
-        if self._pending_restore_index >= len(self._pending_restore_tabs):
-            # All done — validate, reconcile, clear loading indicators
-            self.is_restoring_session = False
-            if self.workspace_manager:
-                all_uuids = [str(t.uuid) for t in self.get_notebook().iter_terminals()]
-                self.workspace_manager.validate_loaded_workspaces(all_uuids)
-                self.workspace_manager.reconcile_orphan_tabs(self._pending_session_uuids)
-                if hasattr(self.workspace_manager, 'set_loading_workspaces'):
-                    self.workspace_manager.set_loading_workspaces(set())
-            self._pending_restore_tabs = None
-            self._pending_session_uuids = None
-            log.info("Background tab restore complete")
-            return False
-
-        nb_key, tab = self._pending_restore_tabs[self._pending_restore_index]
-        self._pending_restore_index += 1
-
-        try:
-            self.is_restoring_session = True
-            self._restore_single_tab(nb_key, tab, background=True)
-        except Exception as e:
-            log.warning("Failed to restore background tab: %s", e)
-
-        # Schedule next tab with a small delay to keep UI responsive
-        GLib.timeout_add(50, self._restore_next_background_tab)
-        return False  # Don't repeat this callback
 
     def load_background_image(self, filename):
         self.background_image_manager.load_from_file(filename)

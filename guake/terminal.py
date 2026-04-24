@@ -142,9 +142,9 @@ class GuakeTerminal(Vte.Terminal):
                 # Determine which shell will be used
                 shell = os.environ.get("SHELL", "/bin/bash")
                 if "zsh" in shell and os.path.exists(zsh_script):
-                    self._shell_integration_cmd = f'source "{zsh_script}" 2>/dev/null; clear'
+                    self._shell_integration_cmd = f'source "{zsh_script}" 2>/dev/null'
                 elif os.path.exists(bash_script):
-                    self._shell_integration_cmd = f'source "{bash_script}" 2>/dev/null; clear'
+                    self._shell_integration_cmd = f'source "{bash_script}" 2>/dev/null'
         except Exception as e:
             log.warning("Could not create block FIFO: %s", e)
 
