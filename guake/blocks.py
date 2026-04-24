@@ -173,94 +173,58 @@ class BlockFIFOReader:
         self.block_model = block_model
         self.on_event = on_event_callback
         self._fd = None
-        self._channel = None
-        self._watch_id = None
         self._poll_id = None
         self._buffer = ""
 
     def start(self):
-        """Open the FIFO and start watching for events."""
+        """Open the FIFO and start polling for events."""
         if not os.path.exists(self.fifo_path):
+            log.warning("FIFO does not exist: %s", self.fifo_path)
             return False
         try:
-            # O_RDWR keeps the FIFO open even when no writer is connected
-            # O_NONBLOCK prevents blocking on read
             self._fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
-
-            # Try GLib.IOChannel (proper GLib way)
-            try:
-                self._channel = GLib.IOChannel.unix_new(self._fd)
-                self._channel.set_encoding(None)
-                self._channel.set_buffered(False)
-                self._watch_id = GLib.io_add_watch(
-                    self._channel,
-                    GLib.PRIORITY_DEFAULT,
-                    GLib.IOCondition.IN | GLib.IOCondition.HUP,
-                    self._on_channel_data,
-                )
-                log.info("Block FIFO reader started (IOChannel): %s", self.fifo_path)
-            except Exception:
-                # Fallback: poll every 200ms
-                self._poll_id = GLib.timeout_add(200, self._poll_fifo)
-                log.info("Block FIFO reader started (polling): %s", self.fifo_path)
-
+            self._poll_id = GLib.timeout_add(150, self._poll_fifo)
+            log.info("Block FIFO reader started (polling 150ms): %s", self.fifo_path)
             return True
         except OSError as e:
             log.error("Failed to open block FIFO %s: %s", self.fifo_path, e)
             return False
 
     def stop(self):
-        """Stop watching and close the FIFO."""
-        if self._watch_id is not None:
-            GLib.source_remove(self._watch_id)
-            self._watch_id = None
+        """Stop polling and close the FIFO."""
         if self._poll_id is not None:
             GLib.source_remove(self._poll_id)
             self._poll_id = None
-        self._channel = None
         if self._fd is not None:
             try:
                 os.close(self._fd)
             except OSError:
                 pass
             self._fd = None
-        # Clean up the FIFO file
         try:
             if os.path.exists(self.fifo_path):
                 os.unlink(self.fifo_path)
         except OSError:
             pass
 
-    def _on_channel_data(self, channel, condition):
-        """GLib IOChannel callback."""
-        if condition & GLib.IOCondition.HUP:
-            return True
-        self._read_and_process()
-        return True
-
     def _poll_fifo(self):
-        """Polling fallback — read from FIFO every 200ms."""
-        self._read_and_process()
-        return True  # keep polling
-
-    def _read_and_process(self):
         """Read available data from the FIFO fd and process events."""
         if self._fd is None:
-            return
+            return False
         try:
             data = os.read(self._fd, 4096)
-            if not data:
-                return
-            self._buffer += data.decode('utf-8', errors='replace')
-        except (OSError, BlockingIOError):
-            return
-
-        # Process complete lines
-        while '\n' in self._buffer:
-            line, self._buffer = self._buffer.split('\n', 1)
-            line = line.strip()
-            if line:
-                self._process_event(line)
+            if data:
+                self._buffer += data.decode('utf-8', errors='replace')
+                while '\n' in self._buffer:
+                    line, self._buffer = self._buffer.split('\n', 1)
+                    line = line.strip()
+                    if line:
+                        self._process_event(line)
+        except BlockingIOError:
+            pass  # nothing to read — normal
+        except OSError as e:
+            log.debug("FIFO read error: %s", e)
+        return True  # keep polling
 
     def _process_event(self, line):
         """Parse a JSON event line and update the block model."""

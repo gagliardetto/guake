@@ -422,13 +422,17 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                 # Self-test: write a test event to verify the pipeline works
                 def _fifo_self_test():
                     try:
-                        with open(fifo_path, 'w') as f:
-                            f.write('{"event":"prompt_start"}\n')
-                        log.info("FIFO self-test write sent to %s", fifo_path)
+                        # Write directly to the existing fd (O_RDWR)
+                        reader = self._block_fifo_reader
+                        if reader and reader._fd is not None:
+                            os.write(reader._fd, b'{"event":"prompt_start"}\n')
+                            log.info("FIFO self-test: wrote test event to fd %d", reader._fd)
+                        else:
+                            log.warning("FIFO self-test: no fd available")
                     except Exception as e:
                         log.warning("FIFO self-test failed: %s", e)
                     return False
-                GLib.timeout_add(500, _fifo_self_test)
+                GLib.timeout_add(800, _fifo_self_test)
             else:
                 log.warning("No block_fifo_path on terminal %s — shell integration won't work", terminal.uuid)
 
