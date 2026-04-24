@@ -897,16 +897,19 @@ class WorkspaceManager:
             if row.get_name() == workspace_id:
                 self.workspace_listbox.select_row(row)
             # Update active styling (cyan name vs normal)
-            box = row.get_child()
-            if box:
-                for child in box.get_children():
-                    if hasattr(child, 'get_style_context'):
-                        ctx = child.get_style_context()
-                        if ctx.has_class("ws-name") or ctx.has_class("ws-name-active"):
-                            if row.get_name() == workspace_id:
-                                ctx.add_class("ws-name-active")
-                            else:
-                                ctx.remove_class("ws-name-active")
+            self._update_row_active_style(row, row.get_name() == workspace_id)
+
+    def _update_row_active_style(self, widget, is_active):
+        """Recursively find ws-name labels and toggle ws-name-active."""
+        ctx = widget.get_style_context()
+        if ctx.has_class("ws-name") or ctx.has_class("ws-name-active"):
+            if is_active:
+                ctx.add_class("ws-name-active")
+            else:
+                ctx.remove_class("ws-name-active")
+        if hasattr(widget, 'get_children'):
+            for child in widget.get_children():
+                self._update_row_active_style(child, is_active)
 
     @save_tabs_when_changed
     def on_add_workspace(self, widget=None, activate=False):
