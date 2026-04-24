@@ -125,8 +125,91 @@ def mk_tab_context_menu(callback_object):
                 log.info("Moving terminal %s to workspace", terminal_uuid)
                 move_to_ws_item.connect("activate", guake.on_populate_move_to_workspace_menu, submenu, terminal_uuid)
 
+        # Watchers submenu
+        if hasattr(guake, 'notification_center'):
+            menu.add(Gtk.SeparatorMenuItem())
+            _add_watcher_menu_items(menu, guake, callback_object)
+
     menu.show_all()
     return menu
+
+
+def _add_watcher_menu_items(menu, guake, tab_label):
+    """Add watcher items to the tab context menu."""
+    nc = guake.notification_center
+    wm = nc.watcher_manager
+
+    # Find terminal UUID and title for this tab
+    page_index = tab_label.notebook.find_tab_index_by_label(tab_label)
+    if page_index < 0:
+        return
+    page = tab_label.notebook.get_nth_page(page_index)
+    terminals = page.get_terminals()
+    if not terminals:
+        return
+    terminal_uuid = str(terminals[0].uuid)
+    tab_title = tab_label.get_text()
+
+    # "Notify on Command Complete"
+    from guake.notifications import CommandCompleteWatcher, RegexWatcher
+    mi = Gtk.MenuItem(label="🔔 Notify on Command Complete")
+    mi.connect("activate", lambda *a: wm.add(
+        CommandCompleteWatcher(terminal_uuid, tab_title)))
+    menu.add(mi)
+
+    # "Notify on Regex Match..."
+    mi = Gtk.MenuItem(label="🔍 Notify on Regex Match...")
+    mi.connect("activate", lambda *a: _show_regex_dialog(guake, wm, terminal_uuid, tab_title))
+    menu.add(mi)
+
+    # Show active watchers for this tab
+    active = wm.get_for_terminal(terminal_uuid)
+    if active:
+        mi = Gtk.MenuItem(label=f"Remove Watchers ({len(active)})")
+        mi.connect("activate", lambda *a: wm.remove_for_terminal(terminal_uuid))
+        menu.add(mi)
+
+
+def _show_regex_dialog(guake, watcher_manager, terminal_uuid, tab_title):
+    """Show a dialog to enter a regex pattern for matching."""
+    from guake.notifications import RegexWatcher
+
+    dialog = Gtk.Dialog(
+        title="Regex Watcher",
+        transient_for=guake.window,
+        modal=True,
+    )
+    dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+    dialog.add_button("Add Watcher", Gtk.ResponseType.ACCEPT)
+    dialog.set_default_response(Gtk.ResponseType.ACCEPT)
+
+    content = dialog.get_content_area()
+    content.set_spacing(8)
+    content.set_margin_start(12)
+    content.set_margin_end(12)
+    content.set_margin_top(8)
+
+    label = Gtk.Label(label=f"Notify when output on '{tab_title}' matches:")
+    label.set_xalign(0)
+    content.add(label)
+
+    entry = Gtk.Entry()
+    entry.set_placeholder_text("e.g. error|failed|exception")
+    entry.set_activates_default(True)
+    content.add(entry)
+
+    hint = Gtk.Label(label="Python regex, case-insensitive")
+    hint.set_xalign(0)
+    hint.get_style_context().add_class("dim-label")
+    content.add(hint)
+
+    dialog.show_all()
+    response = dialog.run()
+    pattern = entry.get_text().strip()
+    dialog.destroy()
+
+    if response == Gtk.ResponseType.ACCEPT and pattern:
+        watcher_manager.add(RegexWatcher(terminal_uuid, pattern, tab_title))
 
 
 def mk_notebook_context_menu(callback_object):

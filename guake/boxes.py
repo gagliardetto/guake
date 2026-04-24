@@ -466,7 +466,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                 self.block_overlay.refresh()
 
     def _update_tab_command_status(self, event_type):
-        """Push block event info to the tab label."""
+        """Push block event info to the tab label and watcher manager."""
         notebook = self.get_notebook()
         if not notebook or not self.block_model:
             return
@@ -474,19 +474,31 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         if page_num < 0:
             return
         tab_label = notebook.get_tab_label(self)
-        if not tab_label or not hasattr(tab_label, 'set_running_command'):
-            return
 
         current = self.block_model._current_block
-        if event_type == "command_start" and current:
-            tab_label.set_running_command(current.command or "")
-        elif event_type == "command_end" and current:
-            tab_label.set_command_result(
-                current.command or "",
-                current.exit_code if current.exit_code is not None else 0)
-        elif event_type == "prompt_start":
-            # Keep showing the last result, don't clear
-            pass
+
+        # Update tab label
+        if tab_label and hasattr(tab_label, 'set_running_command'):
+            if event_type == "command_start" and current:
+                tab_label.set_running_command(current.command or "")
+            elif event_type == "command_end" and current:
+                tab_label.set_command_result(
+                    current.command or "",
+                    current.exit_code if current.exit_code is not None else 0)
+
+        # Notify watcher manager
+        if event_type == "command_end" and current:
+            guake = self.get_guake()
+            if guake and hasattr(guake, 'notification_center'):
+                terminal = list(self.iter_terminals())
+                if terminal:
+                    tab_title = tab_label.get_text() if tab_label and hasattr(tab_label, 'get_text') else ""
+                    guake.notification_center.watcher_manager.on_command_end(
+                        str(terminal[0].uuid),
+                        current.command or "",
+                        current.exit_code if current.exit_code is not None else 0,
+                        tab_title,
+                    )
 
     def _cleanup_blocks(self):
         """Clean up block support resources."""

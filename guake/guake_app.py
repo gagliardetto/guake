@@ -307,6 +307,18 @@ class Guake(SimpleGladeApp):
         self.sidebar_revealer.add(self.workspace_manager.widget)
         self.workspace_manager.widget.show_all()
 
+        # Initialize Notification Center
+        from guake.notifications import NotificationCenter
+        self.notification_center = NotificationCenter(self)
+        # Add bell button to sidebar toolbar
+        if hasattr(self.workspace_manager, '_toolbar'):
+            self.workspace_manager._toolbar.pack_end(
+                self.notification_center.bell_button, False, False, 0)
+            self.notification_center.bell_button.show_all()
+        # Add drawer to mainframe (right side)
+        self.mainframe.pack_end(self.notification_center.widget, False, False, 0)
+        self.notification_center.widget.show_all()
+
         self.update_visual()
         self.window.get_screen().connect("composited-changed", self.update_visual)
 
