@@ -299,3 +299,9 @@ class Keybindings:
             if key > 0:
                 self._lookup[mask][key] = action
                 self._masks |= mask
+
+        # Command palette — Ctrl+Shift+P
+        key, mask = Gtk.accelerator_parse("<Primary><Shift>p")
+        if key > 0:
+            self._lookup[mask][key] = self.guake.show_command_palette
+            self._masks |= mask

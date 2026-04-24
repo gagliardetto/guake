@@ -596,6 +596,13 @@ class Guake(SimpleGladeApp):
         self.hide()
         PrefsDialog(self.settings).show()
 
+    def show_command_palette(self, *args):
+        """Show the command palette (Ctrl+Shift+P)."""
+        if not hasattr(self, '_command_palette') or self._command_palette is None:
+            from guake.command_palette import CommandPalette
+            self._command_palette = CommandPalette(self)
+        self._command_palette.show_palette()
+
     def is_iconified(self):
         return bool(self.window.get_state() & Gdk.WindowState.ICONIFIED) if self.window else False
 
