@@ -54,108 +54,282 @@ from guake.globals import TERMINAL_MATCH_TAGS
 log = logging.getLogger(__name__)
 
 # ############################################################################
-# Homoglyph / IDN attack detection
+# Paste security scanner — detects homoglyphs, invisible chars, bidi attacks
+# Based on tirith's terminal deception checks
 # ############################################################################
 
 import unicodedata
 
-# Characters that look like Latin letters but are from other scripts.
-# Maps confusable codepoint → (looks_like, script_name)
+# Known homoglyph mappings: visually similar to Latin but from other scripts
 _HOMOGLYPHS = {
-    # Cyrillic → Latin lookalikes
-    '\u0410': ('A', 'Cyrillic'), '\u0430': ('a', 'Cyrillic'),
-    '\u0412': ('B', 'Cyrillic'), '\u0435': ('e', 'Cyrillic'),
-    '\u0415': ('E', 'Cyrillic'), '\u041d': ('H', 'Cyrillic'),
-    '\u041a': ('K', 'Cyrillic'), '\u043a': ('k', 'Cyrillic'),
-    '\u041c': ('M', 'Cyrillic'), '\u0422': ('T', 'Cyrillic'),
-    '\u0425': ('X', 'Cyrillic'), '\u0445': ('x', 'Cyrillic'),
-    '\u043e': ('o', 'Cyrillic'), '\u041e': ('O', 'Cyrillic'),
-    '\u0440': ('p', 'Cyrillic'), '\u0420': ('P', 'Cyrillic'),
-    '\u0441': ('c', 'Cyrillic'), '\u0421': ('C', 'Cyrillic'),
-    '\u0443': ('y', 'Cyrillic'), '\u0456': ('i', 'Cyrillic'),
-    '\u0455': ('s', 'Cyrillic'), '\u0458': ('j', 'Cyrillic'),
-    '\u04bb': ('h', 'Cyrillic'), '\u0475': ('v', 'Cyrillic'),
-    '\u0432': ('b', 'Cyrillic'), # в looks like b in some fonts
-    # Greek → Latin lookalikes
+    # Cyrillic → Latin
+    '\u0430': ('a', 'Cyrillic'), '\u0435': ('e', 'Cyrillic'),
+    '\u043e': ('o', 'Cyrillic'), '\u0440': ('p', 'Cyrillic'),
+    '\u0441': ('c', 'Cyrillic'), '\u0443': ('y', 'Cyrillic'),
+    '\u0445': ('x', 'Cyrillic'), '\u0456': ('i', 'Cyrillic'),
+    '\u0458': ('j', 'Cyrillic'), '\u04bb': ('h', 'Cyrillic'),
+    '\u0455': ('s', 'Cyrillic'), '\u0452': ('d', 'Cyrillic'),
+    '\u0410': ('A', 'Cyrillic'), '\u0412': ('B', 'Cyrillic'),
+    '\u0415': ('E', 'Cyrillic'), '\u041a': ('K', 'Cyrillic'),
+    '\u041c': ('M', 'Cyrillic'), '\u041d': ('H', 'Cyrillic'),
+    '\u041e': ('O', 'Cyrillic'), '\u0420': ('P', 'Cyrillic'),
+    '\u0421': ('C', 'Cyrillic'), '\u0422': ('T', 'Cyrillic'),
+    '\u0425': ('X', 'Cyrillic'),
+    # Greek → Latin
+    '\u03b1': ('a', 'Greek'), '\u03b5': ('e', 'Greek'),
+    '\u03b9': ('i', 'Greek'), '\u03bf': ('o', 'Greek'),
     '\u0391': ('A', 'Greek'), '\u0392': ('B', 'Greek'),
-    '\u0395': ('E', 'Greek'), '\u0396': ('Z', 'Greek'),
-    '\u0397': ('H', 'Greek'), '\u0399': ('I', 'Greek'),
-    '\u039a': ('K', 'Greek'), '\u039c': ('M', 'Greek'),
-    '\u039d': ('N', 'Greek'), '\u039f': ('O', 'Greek'),
-    '\u03a1': ('P', 'Greek'), '\u03a4': ('T', 'Greek'),
-    '\u03a5': ('Y', 'Greek'), '\u03a7': ('X', 'Greek'),
-    '\u03bf': ('o', 'Greek'), '\u03b1': ('a', 'Greek'),
-    # Common confusables from other scripts
-    '\u0261': ('g', 'Latin Extended'),  # ɡ
-    '\u026A': ('I', 'Latin Extended'),  # ɪ
-    '\u0131': ('i', 'Latin Extended'),  # ı (dotless i)
-    '\u01C0': ('l', 'Latin Extended'),  # ǀ (click)
-    '\u2010': ('-', 'Punctuation'),     # ‐ (hyphen vs minus)
-    '\u2011': ('-', 'Punctuation'),     # ‑ (non-breaking hyphen)
-    '\u2012': ('-', 'Punctuation'),     # ‒ (figure dash)
-    '\u2013': ('-', 'Punctuation'),     # – (en dash)
-    '\u2014': ('-', 'Punctuation'),     # — (em dash)
-    '\u2015': ('-', 'Punctuation'),     # ― (horizontal bar)
-    '\u2212': ('-', 'Punctuation'),     # − (minus sign)
-    '\uff0d': ('-', 'Fullwidth'),       # － (fullwidth hyphen-minus)
-    '\u2044': ('/', 'Punctuation'),     # ⁄ (fraction slash)
-    '\u2215': ('/', 'Punctuation'),     # ∕ (division slash)
-    '\uff0f': ('/', 'Fullwidth'),       # ／ (fullwidth solidus)
-    '\uff5c': ('|', 'Fullwidth'),       # ｜ (fullwidth vertical bar)
-    '\u2016': ('|', 'Punctuation'),     # ‖ (double vertical line)
+    '\u0395': ('E', 'Greek'), '\u0397': ('H', 'Greek'),
+    '\u0399': ('I', 'Greek'), '\u039a': ('K', 'Greek'),
+    '\u039c': ('M', 'Greek'), '\u039d': ('N', 'Greek'),
+    '\u039f': ('O', 'Greek'), '\u03a1': ('P', 'Greek'),
+    '\u03a4': ('T', 'Greek'), '\u03a7': ('X', 'Greek'),
+    '\u0396': ('Z', 'Greek'),
+    # Armenian
+    '\u0578': ('n', 'Armenian'), '\u0561': ('u', 'Armenian'),
 }
 
-# Additional: detect any non-ASCII that shares a Unicode confusable with ASCII
-def _get_script(char):
-    """Get the Unicode script of a character using its name."""
-    try:
-        name = unicodedata.name(char, '')
-        if 'CYRILLIC' in name: return 'Cyrillic'
-        if 'GREEK' in name: return 'Greek'
-        if 'ARABIC' in name: return 'Arabic'
-        if 'HEBREW' in name: return 'Hebrew'
-        if 'CJK' in name: return 'CJK'
-        if 'HANGUL' in name: return 'Korean'
-        if 'HIRAGANA' in name or 'KATAKANA' in name: return 'Japanese'
-        if 'DEVANAGARI' in name: return 'Devanagari'
-        if 'LATIN' in name: return 'Latin'
-        cat = unicodedata.category(char)
-        if cat.startswith('L'): return 'Other'
-        return 'Common'
-    except Exception:
-        return 'Unknown'
+# Dangerous invisible/control characters
+_ZERO_WIDTH = {
+    '\u200b': 'zero-width space',
+    '\u200c': 'zero-width non-joiner',
+    '\u200d': 'zero-width joiner',
+    '\ufeff': 'byte order mark / zero-width no-break space',
+}
+
+_BIDI_CONTROLS = {
+    '\u202a': 'left-to-right embedding',
+    '\u202b': 'right-to-left embedding',
+    '\u202c': 'pop directional formatting',
+    '\u202d': 'left-to-right override',
+    '\u202e': 'right-to-left override',
+    '\u2066': 'left-to-right isolate',
+    '\u2067': 'right-to-left isolate',
+    '\u2068': 'first strong isolate',
+    '\u2069': 'pop directional isolate',
+}
+
+_INVISIBLE_MATH = {
+    '\u2061': 'function application',
+    '\u2062': 'invisible times',
+    '\u2063': 'invisible separator',
+    '\u2064': 'invisible plus',
+}
+
+_INVISIBLE_WHITESPACE = {
+    '\u2000': 'en quad',
+    '\u2001': 'em quad',
+    '\u2002': 'en space',
+    '\u2003': 'em space',
+    '\u2004': 'three-per-em space',
+    '\u2005': 'four-per-em space',
+    '\u2006': 'six-per-em space',
+    '\u2007': 'figure space',
+    '\u2008': 'punctuation space',
+    '\u2009': 'thin space',
+    '\u200a': 'hair space',
+    '\u205f': 'medium mathematical space',
+    '\u00a0': 'non-breaking space',
+}
+
+_HANGUL_FILLERS = {
+    '\u3164': 'hangul filler',
+    '\u115f': 'hangul choseong filler',
+    '\u1160': 'hangul jungseong filler',
+}
 
 
-def detect_homoglyphs(text):
-    """Detect suspicious Unicode characters that could be homograph attacks.
+class PasteThreat:
+    """A single suspicious element found in pasted text."""
+    __slots__ = ('category', 'severity', 'char', 'codepoint', 'description', 'position')
 
-    Returns a list of (char, name, script, position) tuples for each
-    suspicious character found. Empty list means the text is clean.
+    def __init__(self, category, severity, char, description, position):
+        self.category = category      # 'homoglyph', 'bidi', 'zero_width', 'control', etc.
+        self.severity = severity      # 'critical', 'high', 'medium'
+        self.char = char
+        self.codepoint = f"U+{ord(char):04X}"
+        self.description = description
+        self.position = position
+
+
+def scan_paste(text):
+    """Scan pasted text for security threats. Returns list of PasteThreat.
+
+    Checks (based on tirith's terminal deception rules):
+    1. Homoglyphs — Cyrillic/Greek/Armenian chars that look like Latin
+    2. Bidi controls — can reorder displayed text (Trojan Source)
+    3. Zero-width chars — invisible chars that can hide in commands
+    4. ANSI escapes — can manipulate terminal display
+    5. Control chars — CR/BS can overwrite visible text
+    6. Unicode tags — U+E0000-U+E007F encode hidden ASCII
+    7. Invisible math operators — U+2061-U+2064
+    8. Invisible whitespace — en/em space, figure space, etc.
+    9. Hangul fillers — invisible Korean placeholders
+    10. Math alphanumeric symbols — U+1D400-U+1D7FF steganography
+    11. Hidden multiline — suspicious commands on hidden lines
     """
-    issues = []
+    if not text:
+        return []
+
+    threats = []
+
+    # Check ASCII-only attacks first (these work even with pure ASCII text)
+    # ANSI escapes
     for i, char in enumerate(text):
-        # Check known homoglyphs
+        if ord(char) == 0x1b:
+            threats.append(PasteThreat(
+                'ansi_escape', 'high', char,
+                "ANSI escape sequence start",
+                i))
+        elif ord(char) < 0x20 and ord(char) not in (0x09, 0x0a, 0x0d):
+            threats.append(PasteThreat(
+                'control_char', 'high', char,
+                f"Control character 0x{ord(char):02X}",
+                i))
+        elif char == '\r' and i + 1 < len(text) and text[i + 1] != '\n':
+            threats.append(PasteThreat(
+                'control_char', 'high', char,
+                "Bare carriage return (can overwrite displayed text)",
+                i))
+
+    # Hidden multiline (works on ASCII too)
+    lines = text.split('\n')
+    if len(lines) > 1:
+        suspicious_prefixes = [
+            'curl ', 'wget ', 'bash', '/bin/', 'sudo ', 'rm ',
+            'chmod ', 'eval ', 'exec ', '> /', '>> /', '| sh',
+            'python', 'node ', 'perl ', 'ruby ',
+        ]
+        for line_num, line in enumerate(lines[1:], start=2):
+            trimmed = line.strip()
+            if trimmed and any(trimmed.startswith(p) or p in trimmed for p in suspicious_prefixes):
+                threats.append(PasteThreat(
+                    'hidden_multiline', 'high', '\n',
+                    f"Hidden command on line {line_num}: {trimmed[:60]}",
+                    text.index('\n')))
+                break
+
+    # If pure ASCII and no control/multiline issues, skip Unicode checks
+    if text.isascii():
+        return threats
+
+    for i, char in enumerate(text):
+        cp = ord(char)
+
+        # 1. Known homoglyphs (mixed into ASCII context)
         if char in _HOMOGLYPHS:
             looks_like, script = _HOMOGLYPHS[char]
-            name = unicodedata.name(char, f'U+{ord(char):04X}')
-            issues.append((char, name, script, i))
+            if _is_near_ascii(text, i):
+                threats.append(PasteThreat(
+                    'homoglyph', 'high', char,
+                    f"{script} '{char}' looks like Latin '{looks_like}'",
+                    i))
             continue
 
-        # Check for non-ASCII letters in contexts that look like commands/URLs
-        if ord(char) > 127 and unicodedata.category(char).startswith('L'):
-            script = _get_script(char)
-            if script not in ('Latin', 'Common', 'Unknown'):
-                # Non-Latin letter mixed with ASCII — suspicious
-                # Check if it's near ASCII letters (mixed script)
-                window_start = max(0, i - 3)
-                window_end = min(len(text), i + 4)
-                window = text[window_start:window_end]
-                has_ascii = any(c.isascii() and c.isalpha() for c in window)
-                if has_ascii:
-                    name = unicodedata.name(char, f'U+{ord(char):04X}')
-                    issues.append((char, name, script, i))
+        # 2. Bidi controls (always critical)
+        if char in _BIDI_CONTROLS:
+            threats.append(PasteThreat(
+                'bidi', 'critical', char,
+                f"Bidi control: {_BIDI_CONTROLS[char]}",
+                i))
+            continue
 
-    return issues
+        # 3. Zero-width characters
+        if char in _ZERO_WIDTH:
+            if char in ('\u200c', '\u200d') and _is_joining_context(text, i):
+                continue
+            threats.append(PasteThreat(
+                'zero_width', 'high', char,
+                f"Invisible: {_ZERO_WIDTH[char]}",
+                i))
+            continue
+
+        # 4. Unicode tags (hidden ASCII)
+        if 0xE0001 <= cp <= 0xE007F:
+            hidden_ascii = chr(cp - 0xE0000) if 0x20 <= (cp - 0xE0000) <= 0x7E else '?'
+            threats.append(PasteThreat(
+                'unicode_tag', 'critical', char,
+                f"Unicode tag encoding hidden '{hidden_ascii}'",
+                i))
+            continue
+
+        # 5. Invisible math operators
+        if char in _INVISIBLE_MATH:
+            threats.append(PasteThreat(
+                'invisible_math', 'medium', char,
+                f"Invisible math: {_INVISIBLE_MATH[char]}",
+                i))
+            continue
+
+        # 6. Invisible whitespace
+        if char in _INVISIBLE_WHITESPACE:
+            threats.append(PasteThreat(
+                'invisible_ws', 'medium', char,
+                f"Invisible whitespace: {_INVISIBLE_WHITESPACE[char]}",
+                i))
+            continue
+
+        # 7. Hangul fillers
+        if char in _HANGUL_FILLERS:
+            threats.append(PasteThreat(
+                'hangul_filler', 'medium', char,
+                f"Invisible: {_HANGUL_FILLERS[char]}",
+                i))
+            continue
+
+        # 8. Mathematical alphanumeric symbols (steganography)
+        if 0x1D400 <= cp <= 0x1D7FF:
+            if _is_near_ascii(text, i):
+                name = unicodedata.name(char, f'U+{cp:04X}')
+                threats.append(PasteThreat(
+                    'math_symbol', 'high', char,
+                    f"Math alphanumeric: {name}",
+                    i))
+            continue
+
+        # 9. Variation selectors (steganographic encoding)
+        if (0xFE00 <= cp <= 0xFE0F) or (0xE0100 <= cp <= 0xE01EF):
+            threats.append(PasteThreat(
+                'variation_selector', 'medium', char,
+                f"Variation selector",
+                i))
+            continue
+
+    return threats
+
+
+def _is_near_ascii(text, pos):
+    """Check if position is within the same word as ASCII letters."""
+    start = pos
+    while start > 0 and not text[start - 1] in ' \t\n:;,()[]{}"\'=>|&<':
+        start -= 1
+    end = pos
+    while end < len(text) and not text[end] in ' \t\n:;,()[]{}"\'=>|&<':
+        end += 1
+    return any(c.isascii() and c.isalpha() for c in text[start:end])
+
+
+def _is_joining_context(text, pos):
+    """Check if ZWJ/ZWNJ is between joining-script characters (legit use)."""
+    joining_scripts = {'ARABIC', 'SYRIAC', 'DEVANAGARI', 'BENGALI', 'TAMIL',
+                       'TELUGU', 'KANNADA', 'MALAYALAM', 'THAI', 'TIBETAN', 'MYANMAR'}
+    def _script_of(c):
+        name = unicodedata.name(c, '')
+        for s in joining_scripts:
+            if s in name:
+                return s
+        return None
+
+    before = _script_of(text[pos - 1]) if pos > 0 else None
+    after = _script_of(text[pos + 1]) if pos + 1 < len(text) else None
+    return before is not None and before == after
+
+
+# Keep backward compat — old name used by paste_clipboard
+def detect_homoglyphs(text):
+    """Legacy wrapper. Returns list of (char, name, script, position) tuples."""
+    threats = scan_paste(text)
+    return [(t.char, t.description, t.category, t.position) for t in threats]
 
 libutempter = None
 try:
@@ -296,52 +470,86 @@ class GuakeTerminal(Vte.Terminal):
             guake_clipboard.set_text(self.matched_value, len(self.matched_value))
 
     def paste_clipboard(self):
-        """Override paste to check for homoglyph/IDN attacks before pasting."""
+        """Override paste to check for security threats before pasting."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         text = clipboard.wait_for_text()
         if text:
-            issues = detect_homoglyphs(text)
-            if issues:
-                if not self._show_homoglyph_warning(text, issues):
-                    return  # user cancelled
+            threats = scan_paste(text)
+            if threats:
+                if not self._show_paste_warning(text, threats):
+                    return
         super().paste_clipboard()
 
     def paste_primary(self):
-        """Override primary (middle-click) paste with homoglyph check."""
+        """Override primary (middle-click) paste with security check."""
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
         text = clipboard.wait_for_text()
         if text:
-            issues = detect_homoglyphs(text)
-            if issues:
-                if not self._show_homoglyph_warning(text, issues):
+            threats = scan_paste(text)
+            if threats:
+                if not self._show_paste_warning(text, threats):
                     return
         super().paste_primary()
 
-    def _show_homoglyph_warning(self, text, issues):
-        """Show a warning dialog about suspicious Unicode characters.
+    def _show_paste_warning(self, text, threats):
+        """Show a warning dialog about security threats in pasted text.
         Returns True if user chooses to paste anyway, False to cancel."""
+
+        # Group by severity
+        critical = [t for t in threats if t.severity == 'critical']
+        high = [t for t in threats if t.severity == 'high']
+        medium = [t for t in threats if t.severity == 'medium']
+
+        if critical:
+            severity_text = "CRITICAL"
+            msg_type = Gtk.MessageType.ERROR
+        elif high:
+            severity_text = "HIGH"
+            msg_type = Gtk.MessageType.WARNING
+        else:
+            severity_text = "MEDIUM"
+            msg_type = Gtk.MessageType.WARNING
+
         dialog = Gtk.MessageDialog(
             transient_for=self.guake.window,
             modal=True,
-            message_type=Gtk.MessageType.WARNING,
+            message_type=msg_type,
             buttons=Gtk.ButtonsType.NONE,
-            text="Suspicious Unicode characters detected",
+            text=f"⚠ Paste security warning ({severity_text})",
         )
 
+        # Category labels
+        cat_names = {
+            'homoglyph': '🔤 Homoglyph (lookalike character)',
+            'bidi': '↔ Bidi control (text direction attack)',
+            'zero_width': '👻 Zero-width invisible character',
+            'ansi_escape': '🖥 ANSI escape sequence',
+            'control_char': '⌨ Control character',
+            'unicode_tag': '🏷 Unicode tag (hidden ASCII)',
+            'invisible_math': '📐 Invisible math operator',
+            'invisible_ws': '⬜ Invisible whitespace',
+            'hangul_filler': '🇰🇷 Hangul filler',
+            'math_symbol': '🔢 Math alphanumeric symbol',
+            'variation_selector': '🎨 Variation selector',
+            'hidden_multiline': '📋 Hidden multiline command',
+        }
+
         details = []
-        for char, name, script, position in issues[:10]:
-            hex_code = f"U+{ord(char):04X}"
-            details.append(f"  '{char}' ({hex_code} {name}) — {script} script, position {position}")
-        if len(issues) > 10:
-            details.append(f"  ... and {len(issues) - 10} more")
+        seen_cats = set()
+        for t in threats[:15]:
+            cat_label = cat_names.get(t.category, t.category)
+            if t.category not in seen_cats:
+                details.append(f"\n<b>{GLib.markup_escape_text(cat_label)}</b>")
+                seen_cats.add(t.category)
+            details.append(f"  {t.codepoint}: {GLib.markup_escape_text(t.description)}")
+
+        if len(threats) > 15:
+            details.append(f"\n  ... and {len(threats) - 15} more")
 
         preview = text[:200] + ("..." if len(text) > 200 else "")
 
         dialog.format_secondary_markup(
-            f"The pasted text contains characters from unexpected Unicode scripts "
-            f"(IDN homograph attack vector).\n\n"
-            f"<b>Suspicious characters:</b>\n"
-            f"<tt>{GLib.markup_escape_text(chr(10).join(details))}</tt>\n\n"
+            f"{GLib.markup_escape_text(chr(10).join(details))}\n\n"
             f"<b>Text preview:</b>\n"
             f"<tt>{GLib.markup_escape_text(preview)}</tt>"
         )
