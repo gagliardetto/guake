@@ -53,6 +53,110 @@ from guake.globals import TERMINAL_MATCH_TAGS
 
 log = logging.getLogger(__name__)
 
+# ############################################################################
+# Homoglyph / IDN attack detection
+# ############################################################################
+
+import unicodedata
+
+# Characters that look like Latin letters but are from other scripts.
+# Maps confusable codepoint → (looks_like, script_name)
+_HOMOGLYPHS = {
+    # Cyrillic → Latin lookalikes
+    '\u0410': ('A', 'Cyrillic'), '\u0430': ('a', 'Cyrillic'),
+    '\u0412': ('B', 'Cyrillic'), '\u0435': ('e', 'Cyrillic'),
+    '\u0415': ('E', 'Cyrillic'), '\u041d': ('H', 'Cyrillic'),
+    '\u041a': ('K', 'Cyrillic'), '\u043a': ('k', 'Cyrillic'),
+    '\u041c': ('M', 'Cyrillic'), '\u0422': ('T', 'Cyrillic'),
+    '\u0425': ('X', 'Cyrillic'), '\u0445': ('x', 'Cyrillic'),
+    '\u043e': ('o', 'Cyrillic'), '\u041e': ('O', 'Cyrillic'),
+    '\u0440': ('p', 'Cyrillic'), '\u0420': ('P', 'Cyrillic'),
+    '\u0441': ('c', 'Cyrillic'), '\u0421': ('C', 'Cyrillic'),
+    '\u0443': ('y', 'Cyrillic'), '\u0456': ('i', 'Cyrillic'),
+    '\u0455': ('s', 'Cyrillic'), '\u0458': ('j', 'Cyrillic'),
+    '\u04bb': ('h', 'Cyrillic'), '\u0475': ('v', 'Cyrillic'),
+    '\u0432': ('b', 'Cyrillic'), # в looks like b in some fonts
+    # Greek → Latin lookalikes
+    '\u0391': ('A', 'Greek'), '\u0392': ('B', 'Greek'),
+    '\u0395': ('E', 'Greek'), '\u0396': ('Z', 'Greek'),
+    '\u0397': ('H', 'Greek'), '\u0399': ('I', 'Greek'),
+    '\u039a': ('K', 'Greek'), '\u039c': ('M', 'Greek'),
+    '\u039d': ('N', 'Greek'), '\u039f': ('O', 'Greek'),
+    '\u03a1': ('P', 'Greek'), '\u03a4': ('T', 'Greek'),
+    '\u03a5': ('Y', 'Greek'), '\u03a7': ('X', 'Greek'),
+    '\u03bf': ('o', 'Greek'), '\u03b1': ('a', 'Greek'),
+    # Common confusables from other scripts
+    '\u0261': ('g', 'Latin Extended'),  # ɡ
+    '\u026A': ('I', 'Latin Extended'),  # ɪ
+    '\u0131': ('i', 'Latin Extended'),  # ı (dotless i)
+    '\u01C0': ('l', 'Latin Extended'),  # ǀ (click)
+    '\u2010': ('-', 'Punctuation'),     # ‐ (hyphen vs minus)
+    '\u2011': ('-', 'Punctuation'),     # ‑ (non-breaking hyphen)
+    '\u2012': ('-', 'Punctuation'),     # ‒ (figure dash)
+    '\u2013': ('-', 'Punctuation'),     # – (en dash)
+    '\u2014': ('-', 'Punctuation'),     # — (em dash)
+    '\u2015': ('-', 'Punctuation'),     # ― (horizontal bar)
+    '\u2212': ('-', 'Punctuation'),     # − (minus sign)
+    '\uff0d': ('-', 'Fullwidth'),       # － (fullwidth hyphen-minus)
+    '\u2044': ('/', 'Punctuation'),     # ⁄ (fraction slash)
+    '\u2215': ('/', 'Punctuation'),     # ∕ (division slash)
+    '\uff0f': ('/', 'Fullwidth'),       # ／ (fullwidth solidus)
+    '\uff5c': ('|', 'Fullwidth'),       # ｜ (fullwidth vertical bar)
+    '\u2016': ('|', 'Punctuation'),     # ‖ (double vertical line)
+}
+
+# Additional: detect any non-ASCII that shares a Unicode confusable with ASCII
+def _get_script(char):
+    """Get the Unicode script of a character using its name."""
+    try:
+        name = unicodedata.name(char, '')
+        if 'CYRILLIC' in name: return 'Cyrillic'
+        if 'GREEK' in name: return 'Greek'
+        if 'ARABIC' in name: return 'Arabic'
+        if 'HEBREW' in name: return 'Hebrew'
+        if 'CJK' in name: return 'CJK'
+        if 'HANGUL' in name: return 'Korean'
+        if 'HIRAGANA' in name or 'KATAKANA' in name: return 'Japanese'
+        if 'DEVANAGARI' in name: return 'Devanagari'
+        if 'LATIN' in name: return 'Latin'
+        cat = unicodedata.category(char)
+        if cat.startswith('L'): return 'Other'
+        return 'Common'
+    except Exception:
+        return 'Unknown'
+
+
+def detect_homoglyphs(text):
+    """Detect suspicious Unicode characters that could be homograph attacks.
+
+    Returns a list of (char, name, script, position) tuples for each
+    suspicious character found. Empty list means the text is clean.
+    """
+    issues = []
+    for i, char in enumerate(text):
+        # Check known homoglyphs
+        if char in _HOMOGLYPHS:
+            looks_like, script = _HOMOGLYPHS[char]
+            name = unicodedata.name(char, f'U+{ord(char):04X}')
+            issues.append((char, name, script, i))
+            continue
+
+        # Check for non-ASCII letters in contexts that look like commands/URLs
+        if ord(char) > 127 and unicodedata.category(char).startswith('L'):
+            script = _get_script(char)
+            if script not in ('Latin', 'Common', 'Unknown'):
+                # Non-Latin letter mixed with ASCII — suspicious
+                # Check if it's near ASCII letters (mixed script)
+                window_start = max(0, i - 3)
+                window_end = min(len(text), i + 4)
+                window = text[window_start:window_end]
+                has_ascii = any(c.isascii() and c.isalpha() for c in window)
+                if has_ascii:
+                    name = unicodedata.name(char, f'U+{ord(char):04X}')
+                    issues.append((char, name, script, i))
+
+    return issues
+
 libutempter = None
 try:
     # this allow to run some commands that requires libuterm to
@@ -190,6 +294,65 @@ class GuakeTerminal(Vte.Terminal):
         elif self.matched_value:
             guake_clipboard = Gtk.Clipboard.get_default(self.guake.window.get_display())
             guake_clipboard.set_text(self.matched_value, len(self.matched_value))
+
+    def paste_clipboard(self):
+        """Override paste to check for homoglyph/IDN attacks before pasting."""
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        text = clipboard.wait_for_text()
+        if text:
+            issues = detect_homoglyphs(text)
+            if issues:
+                if not self._show_homoglyph_warning(text, issues):
+                    return  # user cancelled
+        super().paste_clipboard()
+
+    def paste_primary(self):
+        """Override primary (middle-click) paste with homoglyph check."""
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
+        text = clipboard.wait_for_text()
+        if text:
+            issues = detect_homoglyphs(text)
+            if issues:
+                if not self._show_homoglyph_warning(text, issues):
+                    return
+        super().paste_primary()
+
+    def _show_homoglyph_warning(self, text, issues):
+        """Show a warning dialog about suspicious Unicode characters.
+        Returns True if user chooses to paste anyway, False to cancel."""
+        dialog = Gtk.MessageDialog(
+            transient_for=self.guake.window,
+            modal=True,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.NONE,
+            text="Suspicious Unicode characters detected",
+        )
+
+        details = []
+        for char, name, script, position in issues[:10]:
+            hex_code = f"U+{ord(char):04X}"
+            details.append(f"  '{char}' ({hex_code} {name}) — {script} script, position {position}")
+        if len(issues) > 10:
+            details.append(f"  ... and {len(issues) - 10} more")
+
+        preview = text[:200] + ("..." if len(text) > 200 else "")
+
+        dialog.format_secondary_markup(
+            f"The pasted text contains characters from unexpected Unicode scripts "
+            f"(IDN homograph attack vector).\n\n"
+            f"<b>Suspicious characters:</b>\n"
+            f"<tt>{GLib.markup_escape_text(chr(10).join(details))}</tt>\n\n"
+            f"<b>Text preview:</b>\n"
+            f"<tt>{GLib.markup_escape_text(preview)}</tt>"
+        )
+
+        dialog.add_button("Cancel Paste", Gtk.ResponseType.CANCEL)
+        dialog.add_button("Paste Anyway", Gtk.ResponseType.ACCEPT)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+
+        response = dialog.run()
+        dialog.destroy()
+        return response == Gtk.ResponseType.ACCEPT
 
     def copy_on_select(self, event):
         if self.guake.settings.general.get_boolean("copy-on-select") and self.get_has_selection():
