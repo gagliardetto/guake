@@ -365,7 +365,10 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             return
         terminals = list(self.iter_terminals())
         if terminals:
+            log.info("Eagerly initializing blocks for terminal %s", terminals[0].uuid)
             self._setup_blocks(terminals[0])
+        else:
+            log.debug("ensure_blocks_initialized: no terminals found yet")
 
     def _setup_blocks(self, terminal):
         """Initialize block model, overlay, and inline editor for this terminal.
@@ -389,6 +392,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             from guake.inline_editor import InlineEditor
 
             self.block_model = BlockModel(terminal)
+            log.info("BlockModel created for terminal %s", terminal.uuid)
 
             # Block overlay — draws directly on the terminal's draw signal
             self.block_overlay = BlockOverlay(terminal, self.block_model)
@@ -398,6 +402,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                 self.inline_editor = InlineEditor(terminal, self.block_model)
                 self.pack_end(self.inline_editor, False, False, 0)
                 self.inline_editor.show_all()
+                log.info("InlineEditor created (mode=%s)", self._editor_mode)
 
             # Bottom-edge hover detection for "hover" mode
             if self._editor_mode == "hover":
@@ -412,10 +417,13 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
                     fifo_path, self.block_model, self._on_block_event
                 )
                 self._block_fifo_reader.start()
+                log.info("FIFO reader started: %s", fifo_path)
+            else:
+                log.warning("No block_fifo_path on terminal %s — shell integration won't work", terminal.uuid)
 
             log.info("Block support initialized for terminal %s (mode=%s)", terminal.uuid, self._editor_mode)
         except Exception as e:
-            log.warning("Could not initialize block support: %s", e)
+            log.warning("Could not initialize block support: %s", e, exc_info=True)
 
     def _on_terminal_motion(self, terminal, event):
         """Detect mouse at bottom edge of terminal to reveal inline editor."""
@@ -451,6 +459,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
     def _on_block_event(self, event_type):
         """Handle block events from the shell integration FIFO."""
+        log.debug("Block event received: %s", event_type)
         # Update tab label with command status
         self._update_tab_command_status(event_type)
 
