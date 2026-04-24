@@ -61,109 +61,111 @@ class WorkspaceManager:
         self._rebuild_sidebar_id = None
         self._loading_workspaces = set()  # workspace IDs still loading
 
+        from guake.ui_config import get as ui
+
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b"""
-            .sidebar {
+        css_provider.load_from_data(f"""
+            .sidebar {{
                 background-color: rgba(24, 26, 30, 0.97);
                 border-right: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            .sidebar-title {
+            }}
+            .sidebar-title {{
                 font-weight: bold;
-                font-size: 11pt;
+                font-size: {ui('sidebar_header_font_size')}pt;
                 color: rgba(255, 255, 255, 0.7);
                 letter-spacing: 1px;
-            }
-            .sidebar-header {
+            }}
+            .sidebar-header {{
                 border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            }
-            .sidebar-header button {
+            }}
+            .sidebar-header button {{
                 opacity: 0.5;
                 border-radius: 6px;
                 padding: 4px;
                 min-width: 0;
                 min-height: 0;
-            }
-            .sidebar-header button:hover {
+            }}
+            .sidebar-header button:hover {{
                 opacity: 1.0;
                 background-color: rgba(255, 255, 255, 0.08);
-            }
-            .sidebar-filter {
+            }}
+            .sidebar-filter {{
                 background-color: rgba(255, 255, 255, 0.04);
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 6px;
                 color: rgba(255, 255, 255, 0.85);
-                font-size: 9.5pt;
+                font-size: {ui('sidebar_font_size')}pt;
                 padding: 2px 6px;
                 min-height: 0;
-            }
-            .sidebar-filter:focus {
+            }}
+            .sidebar-filter:focus {{
                 border-color: rgba(100, 160, 255, 0.4);
                 background-color: rgba(255, 255, 255, 0.06);
-            }
-            .sidebar-toolbar {
+            }}
+            .sidebar-toolbar {{
                 padding: 2px 0;
-            }
-            .toolbar-btn {
+            }}
+            .toolbar-btn {{
                 opacity: 0.45;
                 padding: 1px 4px;
                 border-radius: 4px;
                 min-width: 0;
                 min-height: 0;
-                font-size: 8.5pt;
-            }
-            .toolbar-btn:hover {
+                font-size: {ui('sidebar_badge_font_size') + 0.5}pt;
+            }}
+            .toolbar-btn:hover {{
                 opacity: 1.0;
                 background-color: rgba(255, 255, 255, 0.08);
-            }
+            }}
 
-            .sidebar list {
+            .sidebar list {{
                 background-color: transparent;
-            }
-            .sidebar list row {
+            }}
+            .sidebar list row {{
                 border-radius: 6px;
                 margin: 0px 4px;
                 padding: 0;
                 transition: background-color 150ms ease;
-            }
-            .sidebar list row:hover {
+            }}
+            .sidebar list row:hover {{
                 background-color: rgba(255, 255, 255, 0.06);
-            }
-            .sidebar list row:selected {
+            }}
+            .sidebar list row:selected {{
                 background-color: rgba(100, 160, 255, 0.15);
-            }
-            .sidebar list row:selected:hover {
+            }}
+            .sidebar list row:selected:hover {{
                 background-color: rgba(100, 160, 255, 0.20);
-            }
+            }}
 
-            .ws-name {
-                font-size: 9.5pt;
+            .ws-name {{
+                font-size: {ui('sidebar_font_size')}pt;
                 color: rgba(255, 255, 255, 0.85);
-            }
-            .ws-name-active {
+            }}
+            .ws-name-active {{
                 color: #6EC1E4;
                 font-weight: bold;
-            }
-            .ws-count-badge {
+            }}
+            .ws-count-badge {{
                 background-color: rgba(255, 255, 255, 0.08);
                 border-radius: 8px;
                 padding: 0px 5px;
-                font-size: 8pt;
+                font-size: {ui('sidebar_badge_font_size')}pt;
                 min-width: 14px;
                 color: rgba(255, 255, 255, 0.4);
-            }
-            .ws-section-header {
-                font-size: 8pt;
+            }}
+            .ws-section-header {{
+                font-size: {ui('sidebar_section_font_size')}pt;
                 font-weight: bold;
                 color: rgba(255, 255, 255, 0.3);
                 letter-spacing: 1px;
                 padding: 6px 12px 1px 12px;
-            }
+            }}
 
-            .git-status-clean { color: #26A269; }
-            .git-status-dirty { color: #FF7800; }
-            .git-status-untracked { color: #F6D32D; }
-            .git-status-nogit { opacity: 0.25; }
-        """)
+            .git-status-clean {{ color: #26A269; }}
+            .git-status-dirty {{ color: #FF7800; }}
+            .git-status-untracked {{ color: #F6D32D; }}
+            .git-status-nogit {{ opacity: 0.25; }}
+        """.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )

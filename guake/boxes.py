@@ -1117,6 +1117,7 @@ class TabLabelEventBox(Gtk.EventBox):
     def __init__(self, notebook, text, settings):
         super().__init__()
         self.notebook = notebook
+        from guake.ui_config import get as ui
 
         # Two-line vertical layout
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, visible=True)
@@ -1125,7 +1126,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self.label = Gtk.Label(label=text, visible=True)
         self.label.set_xalign(0)
         self.label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.label.set_max_width_chars(18)
+        self.label.set_max_width_chars(int(ui('tab_max_chars')))
         self.label.get_style_context().add_class("tab-title")
         self.box.pack_start(self.label, False, False, 0)
 
@@ -1134,7 +1135,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._cmd_label = Gtk.Label(label="", visible=True)
         self._cmd_label.set_xalign(0)
         self._cmd_label.set_ellipsize(Pango.EllipsizeMode.END)
-        self._cmd_label.set_max_width_chars(16)
+        self._cmd_label.set_max_width_chars(int(ui('tab_cmd_max_chars')))
         self._cmd_label.get_style_context().add_class("tab-cmd")
 
         self._status_label = Gtk.Label(label="", visible=False)

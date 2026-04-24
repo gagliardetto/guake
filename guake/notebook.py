@@ -334,109 +334,111 @@ class TerminalNotebook(Gtk.Notebook):
         self.set_action_widget(self.workspace_indicator, Gtk.PackType.START)
 
         # -- Modern tab CSS --
+        from guake.ui_config import get as ui
+
         css = Gtk.CssProvider()
-        css.load_from_data(b"""
-            #notebook-teminals {
+        css.load_from_data(f"""
+            #notebook-teminals {{
                 background-color: rgba(24, 26, 30, 0.97);
-            }
-            #notebook-teminals header.bottom {
+            }}
+            #notebook-teminals header.bottom {{
                 background-color: rgba(24, 26, 30, 0.97);
                 border-top: 1px solid rgba(255, 255, 255, 0.06);
                 border-bottom: none;
                 padding: 1px 2px;
-            }
-            #notebook-teminals tab {
+            }}
+            #notebook-teminals tab {{
                 background-color: transparent;
                 border: none;
                 border-radius: 4px;
                 padding: 2px 6px;
                 margin: 1px 0px;
                 transition: background-color 150ms ease;
-            }
-            #notebook-teminals tab:hover {
+            }}
+            #notebook-teminals tab:hover {{
                 background-color: rgba(255, 255, 255, 0.06);
-            }
-            #notebook-teminals tab:checked {
+            }}
+            #notebook-teminals tab:checked {{
                 background-color: rgba(100, 160, 255, 0.12);
-            }
-            #notebook-teminals tab:checked:hover {
+            }}
+            #notebook-teminals tab:checked:hover {{
                 background-color: rgba(100, 160, 255, 0.18);
-            }
+            }}
 
-            .tab-title {
-                font-size: 9pt;
+            .tab-title {{
+                font-size: {ui('tab_title_font_size')}pt;
                 font-weight: bold;
                 color: rgba(255, 255, 255, 0.55);
-            }
-            #notebook-teminals tab:checked .tab-title {
+            }}
+            #notebook-teminals tab:checked .tab-title {{
                 color: #6EC1E4;
-            }
-            #notebook-teminals tab:hover .tab-title {
+            }}
+            #notebook-teminals tab:hover .tab-title {{
                 color: rgba(255, 255, 255, 0.8);
-            }
-            #notebook-teminals tab:checked:hover .tab-title {
+            }}
+            #notebook-teminals tab:checked:hover .tab-title {{
                 color: #6EC1E4;
-            }
+            }}
 
-            .tab-cmd {
-                font-size: 7.5pt;
+            .tab-cmd {{
+                font-size: {ui('tab_command_font_size')}pt;
                 color: rgba(255, 255, 255, 0.3);
-            }
-            .tab-cmd.cmd-running {
+            }}
+            .tab-cmd.cmd-running {{
                 color: rgba(100, 180, 255, 0.7);
-            }
-            .tab-running {
+            }}
+            .tab-running {{
                 border-radius: 4px;
                 box-shadow: 0 0 4px rgba(100, 180, 255, 0.5),
                             inset 0 0 4px rgba(100, 180, 255, 0.08);
                 border: 1px solid rgba(100, 180, 255, 0.35);
-            }
-            .tab-cmd.cmd-success {
+            }}
+            .tab-cmd.cmd-success {{
                 color: rgba(38, 162, 105, 0.6);
-            }
-            .tab-cmd.cmd-fail {
+            }}
+            .tab-cmd.cmd-fail {{
                 color: rgba(224, 27, 36, 0.7);
-            }
+            }}
 
-            .tab-status {
-                font-size: 7pt;
+            .tab-status {{
+                font-size: {ui('tab_status_font_size')}pt;
                 font-weight: bold;
-            }
-            .tab-status.status-ok {
+            }}
+            .tab-status.status-ok {{
                 color: #26A269;
-            }
-            .tab-status.status-fail {
+            }}
+            .tab-status.status-fail {{
                 color: #E01B24;
-            }
+            }}
 
-            #notebook-teminals tab button {
+            #notebook-teminals tab button {{
                 opacity: 0;
                 min-width: 0;
                 min-height: 0;
                 padding: 0px;
                 border-radius: 3px;
                 transition: opacity 150ms ease;
-            }
+            }}
             #notebook-teminals tab:hover button,
-            #notebook-teminals tab:checked button {
+            #notebook-teminals tab:checked button {{
                 opacity: 0.4;
-            }
-            #notebook-teminals tab button:hover {
+            }}
+            #notebook-teminals tab button:hover {{
                 opacity: 1.0;
                 background-color: rgba(255, 80, 80, 0.3);
-            }
-            #notebook-teminals header.bottom button {
+            }}
+            #notebook-teminals header.bottom button {{
                 opacity: 0.5;
                 border-radius: 4px;
                 padding: 2px 4px;
                 min-width: 0;
                 min-height: 0;
-            }
-            #notebook-teminals header.bottom button:hover {
+            }}
+            #notebook-teminals header.bottom button:hover {{
                 opacity: 1.0;
                 background-color: rgba(255, 255, 255, 0.08);
-            }
-        """)
+            }}
+        """.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
