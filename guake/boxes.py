@@ -1122,11 +1122,9 @@ class TabLabelEventBox(Gtk.EventBox):
         # Two-line vertical layout
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, visible=True)
 
-        # Top line: title
+        # Top line: title (always fully visible)
         self.label = Gtk.Label(label=text, visible=True)
         self.label.set_xalign(0)
-        self.label.set_ellipsize(Pango.EllipsizeMode.END)
-        self.label.set_max_width_chars(int(ui('tab_max_chars')))
         self.label.get_style_context().add_class("tab-title")
         self.box.pack_start(self.label, False, False, 0)
 
