@@ -427,6 +427,11 @@ class TerminalNotebook(Gtk.Notebook):
             .tab-status.status-fail {{
                 color: #E01B24;
             }}
+            .tab-status.status-running {{
+                color: rgba(100, 180, 255, 0.9);
+                font-size: {ui('tab_status_font_size')}pt;
+                font-weight: bold;
+            }}
 
             /* --- Close button (hidden until hover) --- */
             #notebook-teminals tab button {{

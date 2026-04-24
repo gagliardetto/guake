@@ -1262,17 +1262,89 @@ class TabLabelEventBox(Gtk.EventBox):
 
     # ---- Command status updates (called from block events) ----
 
+    # Command type indicators — shown instead of spinner for known commands
+    _CMD_INDICATORS = {
+        # (prefix, indicator, css_class)
+        'ssh ': ('SSH', 'cmd-badge-ssh'),
+        'ssh -': ('SSH', 'cmd-badge-ssh'),
+        'scp ': ('SCP', 'cmd-badge-ssh'),
+        'sftp ': ('SFTP', 'cmd-badge-ssh'),
+        'rsync ': ('SYNC', 'cmd-badge-ssh'),
+        'docker ': ('🐳', 'cmd-badge-docker'),
+        'docker-compose ': ('🐳', 'cmd-badge-docker'),
+        'podman ': ('🐳', 'cmd-badge-docker'),
+        'kubectl ': ('☸', 'cmd-badge-k8s'),
+        'helm ': ('☸', 'cmd-badge-k8s'),
+        'git ': ('GIT', 'cmd-badge-git'),
+        'npm ': ('NPM', 'cmd-badge-node'),
+        'yarn ': ('YARN', 'cmd-badge-node'),
+        'pnpm ': ('PNPM', 'cmd-badge-node'),
+        'node ': ('NODE', 'cmd-badge-node'),
+        'python ': ('PY', 'cmd-badge-python'),
+        'python3 ': ('PY', 'cmd-badge-python'),
+        'pip ': ('PIP', 'cmd-badge-python'),
+        'go ': ('GO', 'cmd-badge-go'),
+        'cargo ': ('RUST', 'cmd-badge-rust'),
+        'make': ('MAKE', 'cmd-badge-build'),
+        'cmake': ('CMAKE', 'cmd-badge-build'),
+        'gradle': ('GRADLE', 'cmd-badge-build'),
+        'mvn ': ('MVN', 'cmd-badge-build'),
+        'vim ': ('VIM', 'cmd-badge-editor'),
+        'nvim ': ('VIM', 'cmd-badge-editor'),
+        'nano ': ('NANO', 'cmd-badge-editor'),
+        'emacs': ('EMACS', 'cmd-badge-editor'),
+        'htop': ('HTOP', 'cmd-badge-monitor'),
+        'top': ('TOP', 'cmd-badge-monitor'),
+        'watch ': ('WATCH', 'cmd-badge-monitor'),
+        'tail ': ('TAIL', 'cmd-badge-monitor'),
+        'less ': ('LESS', 'cmd-badge-monitor'),
+        'man ': ('MAN', 'cmd-badge-monitor'),
+        'sudo ': ('SUDO', 'cmd-badge-sudo'),
+        'su ': ('SU', 'cmd-badge-sudo'),
+        'curl ': ('CURL', 'cmd-badge-net'),
+        'wget ': ('WGET', 'cmd-badge-net'),
+        'ping ': ('PING', 'cmd-badge-net'),
+        'nmap ': ('NMAP', 'cmd-badge-net'),
+        'mysql': ('SQL', 'cmd-badge-db'),
+        'psql': ('SQL', 'cmd-badge-db'),
+        'redis-cli': ('REDIS', 'cmd-badge-db'),
+        'mongosh': ('MONGO', 'cmd-badge-db'),
+    }
+
+    def _get_cmd_indicator(self, command_text):
+        """Return (indicator_text, css_class) for a command, or None for generic spinner."""
+        cmd = command_text.strip().lower()
+        # Check prefixes (longer matches first)
+        for prefix, (indicator, css_class) in sorted(
+                self._CMD_INDICATORS.items(), key=lambda x: -len(x[0])):
+            if cmd.startswith(prefix):
+                return indicator, css_class
+        return None, None
+
     def set_running_command(self, command_text):
-        """Show a running command with spinner."""
+        """Show a running command with contextual indicator."""
         cmd = self._truncate_cmd(command_text)
         self._cmd_label.set_text(cmd)
         self._cmd_label.get_style_context().remove_class("cmd-success")
         self._cmd_label.get_style_context().remove_class("cmd-fail")
         self._cmd_label.get_style_context().add_class("cmd-running")
         self.get_style_context().add_class("tab-running")
-        self._status_label.hide()
-        self._spinner.show()
-        self._spinner.start()
+        self._status_label.get_style_context().remove_class("status-ok")
+        self._status_label.get_style_context().remove_class("status-fail")
+
+        indicator, _ = self._get_cmd_indicator(command_text)
+        if indicator:
+            # Show badge instead of spinner
+            self._spinner.stop()
+            self._spinner.hide()
+            self._status_label.set_text(indicator)
+            self._status_label.get_style_context().add_class("status-running")
+            self._status_label.show()
+        else:
+            # Generic spinner for unknown commands
+            self._status_label.hide()
+            self._spinner.show()
+            self._spinner.start()
 
     def set_command_result(self, command_text, exit_code):
         """Show finished command with success/failure indicator."""
@@ -1282,6 +1354,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._spinner.hide()
         self._cmd_label.get_style_context().remove_class("cmd-running")
         self.get_style_context().remove_class("tab-running")
+        self._status_label.get_style_context().remove_class("status-running")
 
         if exit_code == 0:
             self._cmd_label.get_style_context().remove_class("cmd-fail")
@@ -1304,6 +1377,7 @@ class TabLabelEventBox(Gtk.EventBox):
         self._cmd_label.get_style_context().remove_class("cmd-success")
         self._cmd_label.get_style_context().remove_class("cmd-fail")
         self.get_style_context().remove_class("tab-running")
+        self._status_label.get_style_context().remove_class("status-running")
         self._status_label.hide()
         self._spinner.stop()
         self._spinner.hide()
