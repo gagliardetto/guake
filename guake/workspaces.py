@@ -87,6 +87,34 @@ class WorkspaceManager:
                 opacity: 1.0;
                 background-color: rgba(255, 255, 255, 0.08);
             }
+            .sidebar-filter {
+                background-color: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                color: rgba(255, 255, 255, 0.85);
+                font-size: 9.5pt;
+                padding: 2px 6px;
+                min-height: 0;
+            }
+            .sidebar-filter:focus {
+                border-color: rgba(100, 160, 255, 0.4);
+                background-color: rgba(255, 255, 255, 0.06);
+            }
+            .sidebar-toolbar {
+                padding: 2px 0;
+            }
+            .toolbar-btn {
+                opacity: 0.45;
+                padding: 1px 4px;
+                border-radius: 4px;
+                min-width: 0;
+                min-height: 0;
+                font-size: 8.5pt;
+            }
+            .toolbar-btn:hover {
+                opacity: 1.0;
+                background-color: rgba(255, 255, 255, 0.08);
+            }
 
             .sidebar list {
                 background-color: transparent;
@@ -291,12 +319,13 @@ class WorkspaceManager:
 
     def _build_header(self):
         """
-        Builds the header of the sidebar with a title and an expanded menu button.
+        Builds the header with filter search, menu, and mini toolbar.
         """
+        # -- Top bar: menu + filter + add button --
         header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         header_box.get_style_context().add_class("sidebar-header")
         header_box.set_margin_top(6)
-        header_box.set_margin_bottom(4)
+        header_box.set_margin_bottom(2)
         header_box.set_margin_start(8)
         header_box.set_margin_end(6)
 
@@ -330,20 +359,109 @@ class WorkspaceManager:
             app_action_group.add_action(action)
         self.guake_app.window.insert_action_group("app", app_action_group)
 
-        title = Gtk.Label(label="Workspaces")
-        title.set_halign(Gtk.Align.CENTER)
-        title.set_hexpand(True)
-        title.get_style_context().add_class("sidebar-title")
-        
-        add_ws_button = Gtk.Button(image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON), relief=Gtk.ReliefStyle.NONE)
+        # Filter entry — doubles as title when empty
+        self._filter_entry = Gtk.SearchEntry()
+        self._filter_entry.set_placeholder_text("Workspaces")
+        self._filter_entry.set_hexpand(True)
+        self._filter_entry.get_style_context().add_class("sidebar-filter")
+        self._filter_entry.connect("search-changed", self._on_filter_changed)
+        self._filter_entry.connect("key-press-event", self._on_filter_key)
+        self._filter_text = ""
+
+        add_ws_button = Gtk.Button(
+            image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON),
+            relief=Gtk.ReliefStyle.NONE)
         add_ws_button.connect("clicked", self.on_add_workspace)
 
         header_box.pack_start(menu_button, False, False, 0)
-        header_box.pack_start(title, True, True, 0)
+        header_box.pack_start(self._filter_entry, True, True, 0)
         header_box.pack_end(add_ws_button, False, False, 0)
 
         self.widget.pack_start(header_box, False, False, 0)
+
+        # -- Mini toolbar: no-workspace count + quick actions --
+        self._toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._toolbar.get_style_context().add_class("sidebar-toolbar")
+        self._toolbar.set_margin_start(8)
+        self._toolbar.set_margin_end(6)
+        self._toolbar.set_margin_bottom(2)
+
+        # Unsorted tabs button (the "no workspace")
+        self._unsorted_btn = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
+        self._unsorted_btn.get_style_context().add_class("toolbar-btn")
+        self._unsorted_btn.set_tooltip_text("Unsorted tabs")
+        self._unsorted_btn.connect("clicked", lambda w: self._activate_no_workspace())
+        self._toolbar.pack_start(self._unsorted_btn, False, False, 0)
+
+        # Spacer
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        self._toolbar.pack_start(spacer, True, True, 0)
+
+        # Quick action buttons
+        for icon, tooltip, cb in [
+            ("document-save-symbolic", "Save tabs", lambda w: self.guake_app.save_tabs()),
+            ("view-refresh-symbolic", "Refresh git", lambda w: self._refresh_git_status()),
+        ]:
+            btn = Gtk.Button(
+                image=Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.SMALL_TOOLBAR),
+                relief=Gtk.ReliefStyle.NONE)
+            btn.get_style_context().add_class("toolbar-btn")
+            btn.set_tooltip_text(tooltip)
+            btn.connect("clicked", cb)
+            self._toolbar.pack_end(btn, False, False, 0)
+
+        self.widget.pack_start(self._toolbar, False, False, 0)
         self.widget.pack_start(Gtk.Separator(), False, False, 0)
+
+    def _update_toolbar(self):
+        """Update the unsorted tabs button in the toolbar."""
+        no_ws = self.get_workspace_by_id(ZERO_UUID)
+        count = len(no_ws.get("terminals", [])) if no_ws else 0
+        if count > 0:
+            self._unsorted_btn.set_label(f"📥 {count} unsorted")
+            self._unsorted_btn.show()
+        else:
+            self._unsorted_btn.hide()
+
+    def _activate_no_workspace(self):
+        """Switch to the no-workspace view."""
+        self.guake_app.switch_to_workspace(ZERO_UUID)
+
+    def _on_filter_changed(self, entry):
+        """Filter workspaces as user types."""
+        self._filter_text = entry.get_text().strip().lower()
+        if hasattr(self, 'workspace_listbox'):
+            self.workspace_listbox.invalidate_filter()
+
+    def _on_filter_key(self, entry, event):
+        """Escape clears filter and returns focus to terminal."""
+        if event.keyval == Gdk.keyval_from_name("Escape"):
+            if self._filter_text:
+                entry.set_text("")
+                return True
+            # Return focus to terminal
+            nb = self.guake_app.get_notebook()
+            if nb:
+                t = nb.get_current_terminal()
+                if t:
+                    t.grab_focus()
+            return True
+        return False
+
+    def _filter_func(self, row):
+        """ListBox filter function — show only matching workspaces."""
+        if not self._filter_text:
+            return True
+        ws_id = row.get_name()
+        if not ws_id:
+            return False  # separator rows
+        ws = self.get_workspace_by_id(ws_id)
+        if not ws:
+            return True  # section headers
+        name = ws.get("name", "").lower()
+        icon = ws.get("icon", "").lower()
+        return self._filter_text in name or self._filter_text in icon
 
     def _build_workspace_list(self):
         """Schedule a sidebar rebuild. Multiple calls within the same event
@@ -364,6 +482,7 @@ class WorkspaceManager:
         self.workspace_listbox = Gtk.ListBox()
         self.workspace_listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.workspace_listbox.connect("row-activated", self.on_workspace_activated)
+        self.workspace_listbox.set_filter_func(self._filter_func)
 
         self.workspace_listbox.drag_dest_set(Gtk.DestDefaults.ALL, DND_TARGET, Gdk.DragAction.MOVE)
         self.workspace_listbox.connect("drag-motion", self.on_drag_motion)
@@ -371,20 +490,8 @@ class WorkspaceManager:
         self.workspace_listbox.connect("drag-data-received", self.on_drag_data_received)
 
         all_workspaces = self.workspaces_data.get("workspaces", [])
-        
-        no_workspace = self.get_workspace_by_id(ZERO_UUID)
-        if no_workspace and no_workspace.get("terminals"):
-            row = self.create_workspace_row(no_workspace, is_pinned=False)
-            self.workspace_listbox.add(row)
-            if any(w.get('id') != ZERO_UUID for w in all_workspaces):
-                separator_row = Gtk.ListBoxRow()
-                separator_row.set_selectable(False)
-                separator = Gtk.Separator()
-                separator.set_margin_top(2)
-                separator.set_margin_bottom(2)
-                separator_row.add(separator)
-                self.workspace_listbox.add(separator_row)
 
+        # No-workspace is shown in the toolbar, not the list
         regular_workspaces = [w for w in all_workspaces if w.get("id") != ZERO_UUID]
         pinned_workspaces = sorted(
             [w for w in regular_workspaces if w.get("is_pinned")],
@@ -432,6 +539,7 @@ class WorkspaceManager:
         self.scrolled_window.show_all()
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
+        self._update_toolbar()
 
     def _create_workspace_context_menu(self, ws_data):
         menu = Gtk.Menu()
