@@ -173,7 +173,9 @@ class BlockFIFOReader:
         self.block_model = block_model
         self.on_event = on_event_callback
         self._fd = None
+        self._channel = None
         self._watch_id = None
+        self._poll_id = None
         self._buffer = ""
 
     def start(self):
@@ -184,13 +186,24 @@ class BlockFIFOReader:
             # O_RDWR keeps the FIFO open even when no writer is connected
             # O_NONBLOCK prevents blocking on read
             self._fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
-            self._watch_id = GLib.io_add_watch(
-                self._fd,
-                GLib.PRIORITY_DEFAULT,
-                GLib.IOCondition.IN | GLib.IOCondition.HUP,
-                self._on_data_available,
-            )
-            log.info("Block FIFO reader started: %s", self.fifo_path)
+
+            # Try GLib.IOChannel (proper GLib way)
+            try:
+                self._channel = GLib.IOChannel.unix_new(self._fd)
+                self._channel.set_encoding(None)
+                self._channel.set_buffered(False)
+                self._watch_id = GLib.io_add_watch(
+                    self._channel,
+                    GLib.PRIORITY_DEFAULT,
+                    GLib.IOCondition.IN | GLib.IOCondition.HUP,
+                    self._on_channel_data,
+                )
+                log.info("Block FIFO reader started (IOChannel): %s", self.fifo_path)
+            except Exception:
+                # Fallback: poll every 200ms
+                self._poll_id = GLib.timeout_add(200, self._poll_fifo)
+                log.info("Block FIFO reader started (polling): %s", self.fifo_path)
+
             return True
         except OSError as e:
             log.error("Failed to open block FIFO %s: %s", self.fifo_path, e)
@@ -201,6 +214,10 @@ class BlockFIFOReader:
         if self._watch_id is not None:
             GLib.source_remove(self._watch_id)
             self._watch_id = None
+        if self._poll_id is not None:
+            GLib.source_remove(self._poll_id)
+            self._poll_id = None
+        self._channel = None
         if self._fd is not None:
             try:
                 os.close(self._fd)
@@ -214,19 +231,29 @@ class BlockFIFOReader:
         except OSError:
             pass
 
-    def _on_data_available(self, fd, condition):
-        """GLib IO watch callback — read and parse events from the FIFO."""
+    def _on_channel_data(self, channel, condition):
+        """GLib IOChannel callback."""
         if condition & GLib.IOCondition.HUP:
-            # Writer disconnected, but we keep the FIFO open (O_RDWR)
             return True
+        self._read_and_process()
+        return True
 
+    def _poll_fifo(self):
+        """Polling fallback — read from FIFO every 200ms."""
+        self._read_and_process()
+        return True  # keep polling
+
+    def _read_and_process(self):
+        """Read available data from the FIFO fd and process events."""
+        if self._fd is None:
+            return
         try:
-            data = os.read(fd, 4096)
+            data = os.read(self._fd, 4096)
             if not data:
-                return True
+                return
             self._buffer += data.decode('utf-8', errors='replace')
         except (OSError, BlockingIOError):
-            return True
+            return
 
         # Process complete lines
         while '\n' in self._buffer:
@@ -234,8 +261,6 @@ class BlockFIFOReader:
             line = line.strip()
             if line:
                 self._process_event(line)
-
-        return True
 
     def _process_event(self, line):
         """Parse a JSON event line and update the block model."""
