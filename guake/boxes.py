@@ -1260,6 +1260,33 @@ class TabLabelEventBox(Gtk.EventBox):
         self.add(overlay)
         self.connect("button-press-event", self.on_button_press, self.label)
 
+        # Completion time tracking for tooltip
+        self._completed_at = None
+        self._completed_cmd = None
+        self._completed_exit = None
+        self.connect("query-tooltip", self._on_query_tooltip)
+
+    def _on_query_tooltip(self, widget, x, y, keyboard, tooltip):
+        """Show how long ago the last command completed."""
+        if self._completed_at is None:
+            return False
+        elapsed = int(time.time() - self._completed_at)
+        if elapsed < 5:
+            ago = "just now"
+        elif elapsed < 60:
+            ago = f"{elapsed}s ago"
+        elif elapsed < 3600:
+            ago = f"{elapsed // 60}m {elapsed % 60}s ago"
+        else:
+            h = elapsed // 3600
+            m = (elapsed % 3600) // 60
+            ago = f"{h}h {m}m ago"
+
+        status = "✓" if self._completed_exit == 0 else f"✗ {self._completed_exit}"
+        cmd = (self._completed_cmd or "")[:60]
+        tooltip.set_text(f"{status} {cmd} — {ago}")
+        return True
+
     # ---- Command status updates (called from block events) ----
 
     # Command type indicators — shown instead of spinner for known commands
@@ -1323,6 +1350,8 @@ class TabLabelEventBox(Gtk.EventBox):
 
     def set_running_command(self, command_text):
         """Show a running command with contextual indicator."""
+        self._completed_at = None  # clear tooltip while running
+        self.set_has_tooltip(False)
         cmd = self._truncate_cmd(command_text)
         self._cmd_label.set_text(cmd)
         self._cmd_label.get_style_context().remove_class("cmd-success")
@@ -1369,6 +1398,12 @@ class TabLabelEventBox(Gtk.EventBox):
             self._status_label.get_style_context().remove_class("status-ok")
             self._status_label.get_style_context().add_class("status-fail")
         self._status_label.show()
+
+        # Store completion time for tooltip
+        self._completed_at = time.time()
+        self._completed_cmd = command_text
+        self._completed_exit = exit_code
+        self.set_has_tooltip(True)
 
     def clear_command(self):
         """Clear the command line (idle prompt)."""
