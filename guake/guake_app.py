@@ -936,10 +936,14 @@ class Guake(SimpleGladeApp):
 
     def on_window_motion(self, widget, event):
         hot_edge_width = 5  # px — wide enough to reliably trigger
+        window_width = self.window.get_allocated_width()
         sidebar_width = self.sidebar_revealer.get_allocated_width()
         is_revealed = self.sidebar_revealer.get_reveal_child()
 
-        if event.x < hot_edge_width:
+        # Only trigger on the LEFT edge (x near 0), never on the right
+        on_left_edge = event.x < hot_edge_width and event.x < (window_width / 2)
+
+        if on_left_edge:
             # Zone: HOT EDGE — reveal sidebar, cancel any pending hide
             self._cancel_sidebar_hide_timer()
             if not is_revealed:
