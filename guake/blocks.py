@@ -357,8 +357,10 @@ class BlockOverlay:
         visible_bottom = visible_top + int(adj.get_page_size())
 
         # Detect alternate screen buffer (TUI apps like ssh/tmux/vim):
+        # Only check when a command is actively RUNNING (not yet completed).
         # Alternate screen has no scrollback (upper ≈ page_size).
-        if not self.block_model._input_phase and self.block_model._current_block:
+        current = self.block_model._current_block
+        if current and current.is_running:
             has_scrollback = adj.get_upper() > adj.get_page_size() + 2
             if not has_scrollback:
                 return False
