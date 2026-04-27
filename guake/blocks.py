@@ -84,30 +84,6 @@ class BlockModel:
         self.blocks = []
         self._current_block = None
         self._input_phase = False   # True = prompt shown, waiting for command
-        self._tui_active = False    # True = full-screen app (ssh, tmux, vim) is running
-
-    # TUI commands that take over the terminal screen
-    _TUI_COMMANDS = {
-        'ssh', 'tmux', 'screen', 'vim', 'nvim', 'vi', 'nano', 'emacs',
-        'htop', 'top', 'btop', 'less', 'more', 'man', 'nnn', 'ranger',
-        'mc', 'tig', 'lazygit', 'lazydocker', 'k9s', 'watch',
-        'ncdu', 'gdu', 'cmus', 'mutt', 'neomutt', 'weechat', 'irssi',
-        'mosh', 'telnet', 'ftp', 'mysql', 'psql', 'mongosh', 'redis-cli',
-        'python', 'python3', 'ipython', 'node', 'irb', 'ghci',
-    }
-
-    @classmethod
-    def _is_tui_command(cls, command_text):
-        """Check if a command launches a full-screen TUI app."""
-        cmd = command_text.strip()
-        # Strip leading sudo/env/etc
-        for prefix in ('sudo ', 'env ', 'command ', 'exec ', 'nohup '):
-            if cmd.startswith(prefix):
-                cmd = cmd[len(prefix):].lstrip()
-        # Get the base command name
-        base = cmd.split()[0] if cmd.split() else ''
-        base = base.rsplit('/', 1)[-1]  # strip path like /usr/bin/vim → vim
-        return base in cls._TUI_COMMANDS
 
     @property
     def input_phase(self):
@@ -127,10 +103,12 @@ class BlockModel:
         """Shell emitted prompt_start — a new prompt is being shown."""
         cursor_row = self._get_cursor_row()
 
-        # TUI app exited — clear old blocks since the screen was taken over
-        if self._tui_active:
-            self.blocks.clear()
-            self._tui_active = False
+        # Detect alternate screen exit: if cursor jumped far from last block,
+        # old blocks are stale (SSH/tmux/vim used alternate screen buffer)
+        if self.blocks and self._current_block:
+            last_row = self._current_block.command_row or self._current_block.prompt_row
+            if last_row is not None and abs(cursor_row - last_row) > 500:
+                self.blocks.clear()
 
         # Close the previous block
         if self._current_block and not self._current_block.is_complete:
@@ -151,9 +129,6 @@ class BlockModel:
             self._current_block.command = command_text
             self._current_block.command_row = self._get_cursor_row()
         self._input_phase = False
-
-        # Detect full-screen TUI apps that take over the terminal
-        self._tui_active = self._is_tui_command(command_text) if command_text else False
 
     def on_command_end(self, exit_code=None, duration=None):
         """Shell emitted command_end — command finished executing."""
@@ -377,9 +352,19 @@ class BlockOverlay:
         if not self.block_model.blocks:
             return False
 
-        # Suppress overlay while a TUI app has taken over the screen
-        if self.block_model._tui_active:
-            return False
+        # When a command is running, check if blocks are still relevant
+        # to the visible area. TUI apps (ssh/vim/tmux) use alternate screen,
+        # making old block positions invalid.
+        if not self.block_model._input_phase and self.block_model._current_block:
+            adj = self.terminal.get_vadjustment()
+            visible_top = int(adj.get_value())
+            visible_bottom = visible_top + int(adj.get_page_size())
+            any_visible = any(
+                b.is_complete and b.end_row >= visible_top and b.prompt_row <= visible_bottom
+                for b in self.block_model.blocks
+            )
+            if not any_visible:
+                return False
 
         alloc = terminal.get_allocation()
         width = alloc.width
