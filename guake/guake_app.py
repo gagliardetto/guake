@@ -935,27 +935,29 @@ class Guake(SimpleGladeApp):
             adj.set_value(max(0, absolute_row - 2))  # 2 rows padding above
 
     def on_window_motion(self, widget, event):
-        hot_edge_width = 5  # px — wide enough to reliably trigger
-        window_width = self.window.get_allocated_width()
+        hot_edge_width = 5  # px
         sidebar_width = self.sidebar_revealer.get_allocated_width()
         is_revealed = self.sidebar_revealer.get_reveal_child()
 
-        # Only trigger on the LEFT edge (x near 0), never on the right
-        on_left_edge = event.x < hot_edge_width and event.x < (window_width / 2)
+        # Get mouse position relative to the window (not the child widget)
+        win = self.window.get_window()
+        if not win:
+            return
+        _, win_x, win_y = win.get_origin()
+        mouse_x = event.x_root - win_x  # x relative to window left edge
+
+        on_left_edge = mouse_x < hot_edge_width
 
         if on_left_edge:
-            # Zone: HOT EDGE — reveal sidebar, cancel any pending hide
             self._cancel_sidebar_hide_timer()
             if not is_revealed:
                 self.sidebar_revealer.set_reveal_child(True)
                 self.sidebar_last_opened_time = pytime.time()
 
-        elif is_revealed and event.x <= sidebar_width:
-            # Zone: ON SIDEBAR — cancel any pending hide (user is interacting)
+        elif is_revealed and mouse_x <= sidebar_width:
             self._cancel_sidebar_hide_timer()
 
         else:
-            # Zone: MAIN AREA — schedule hide if sidebar is visible
             if is_revealed and not self.sidebar_hide_timer:
                 time_since_open = pytime.time() - self.sidebar_last_opened_time
                 wait_for_min_open_time = max(0, 0.6 - time_since_open)

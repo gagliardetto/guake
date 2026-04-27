@@ -352,28 +352,21 @@ class BlockOverlay:
         if not self.block_model.blocks:
             return False
 
-        # When a command is running, check if blocks are still relevant
-        # to the visible area. TUI apps (ssh/vim/tmux) use alternate screen,
-        # making old block positions invalid.
+        adj = self.terminal.get_vadjustment()
+        visible_top = int(adj.get_value())
+        visible_bottom = visible_top + int(adj.get_page_size())
+
+        # Detect alternate screen buffer (TUI apps like ssh/tmux/vim):
+        # Alternate screen has no scrollback (upper ≈ page_size).
         if not self.block_model._input_phase and self.block_model._current_block:
-            adj = self.terminal.get_vadjustment()
-            visible_top = int(adj.get_value())
-            visible_bottom = visible_top + int(adj.get_page_size())
-            any_visible = any(
-                b.is_complete and b.end_row >= visible_top and b.prompt_row <= visible_bottom
-                for b in self.block_model.blocks
-            )
-            if not any_visible:
+            has_scrollback = adj.get_upper() > adj.get_page_size() + 2
+            if not has_scrollback:
                 return False
 
         alloc = terminal.get_allocation()
         width = alloc.width
         height = alloc.height
         _, char_h = self._get_char_metrics()
-
-        adj = self.terminal.get_vadjustment()
-        visible_top = int(adj.get_value())
-        visible_bottom = visible_top + int(adj.get_page_size())
 
         # Set up font for labels
         cr.select_font_face("Monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
