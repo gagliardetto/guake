@@ -1084,19 +1084,10 @@ class TerminalBox(Gtk.Box, TerminalHolderChild, TerminalHolder):
 
     def on_button_press(self, target, event, user_data):
         if event.button == 3:
-            # In alternate screen (TUI mode), always show our menu.
-            # Otherwise, let VTE/the app handle it first (unless Shift is held).
-            in_alt_screen = False
-            adj = self.terminal.get_vadjustment()
-            if adj.get_upper() <= adj.get_page_size() + 2:
-                root = self.get_root_box()
-                if root and root.block_model and root.block_model._current_block:
-                    if root.block_model._current_block.is_running:
-                        in_alt_screen = True
-
+            # First send to background process if handled, do nothing else.
+            # Hold Shift+right-click to bypass the app and show our menu.
             if (
-                not in_alt_screen
-                and not event.get_state() & Gdk.ModifierType.SHIFT_MASK
+                not event.get_state() & Gdk.ModifierType.SHIFT_MASK
                 and Vte.Terminal.do_button_press_event(self.terminal, event)
             ):
                 return True
