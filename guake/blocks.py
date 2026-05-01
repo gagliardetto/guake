@@ -190,8 +190,8 @@ class BlockFIFOReader:
             return False
         try:
             self._fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
-            self._poll_id = GLib.timeout_add(150, self._poll_fifo)
-            log.info("Block FIFO reader started (polling 150ms): %s", self.fifo_path)
+            self._poll_id = GLib.timeout_add(500, self._poll_fifo)
+            log.info("Block FIFO reader started (polling 500ms): %s", self.fifo_path)
             return True
         except OSError as e:
             log.error("Failed to open block FIFO %s: %s", self.fifo_path, e)
