@@ -768,45 +768,18 @@ class Guake(SimpleGladeApp):
                     root, True, GrabModeAsync, GrabModeAsync)
             xlib.XSync(display, False)
 
-            # Get the X11 window ID for direct manipulation
-            gdk_window = self.window.get_window()
-            if hasattr(gdk_window, 'get_xid'):
-                x11_wid = gdk_window.get_xid()
-            else:
-                log.info("No XID available (Wayland?) — using Keybinder")
-                return False
-
-            log.info("X11 hotkey grab: keycode=%d mods=%d wid=0x%x", x11_keycode, x11_mods, x11_wid)
+            log.info("X11 hotkey grab: keycode=%d mods=%d", x11_keycode, x11_mods)
 
             def _x11_hotkey_loop():
                 import ctypes as ct
                 event_buf = (ct.c_long * 24)()
-                SubstructureRedirectMask = 1 << 20
-                SubstructureNotifyMask = 1 << 19
-                RevertToParent = 2
-
                 while True:
                     try:
                         xlib.XNextEvent(display, ct.byref(event_buf))
-                        if event_buf[0] != KeyPress:
-                            continue
-
-                        # Check current window state via XGetWindowAttributes
-                        attrs = (ct.c_long * 24)()
-                        xlib.XGetWindowAttributes(display, x11_wid, ct.byref(attrs))
-                        is_mapped = attrs[19]  # map_state: 0=Unmap, 1=Unviewable, 2=Viewable
-
-                        if is_mapped == 2:
-                            # Window is visible — hide it
-                            xlib.XUnmapWindow(display, x11_wid)
-                            xlib.XSync(display, False)
-                            GLib.idle_add(self._x11_post_hide)
-                        else:
-                            # Window is hidden — show it
-                            xlib.XMapRaised(display, x11_wid)
-                            xlib.XSetInputFocus(display, x11_wid, RevertToParent, 0)
-                            xlib.XSync(display, False)
-                            GLib.idle_add(self._x11_post_show)
+                        if event_buf[0] == KeyPress:
+                            # GLib.idle_add with HIGH priority inserts before
+                            # VTE's IO watches (which use DEFAULT priority).
+                            GLib.idle_add(self.show_hide, priority=GLib.PRIORITY_HIGH)
                     except Exception as e:
                         log.error("X11 hotkey thread error: %s", e)
                         break
@@ -818,23 +791,6 @@ class Guake(SimpleGladeApp):
         except Exception as e:
             log.warning("X11 hotkey setup failed: %s — using Keybinder", e)
             return False
-
-    def _x11_post_show(self):
-        """Follow-up work after X11 thread showed the window."""
-        self.hidden = False
-        RectCalculator.set_final_window_rect(self.settings, self.window)
-        self.set_terminal_focus()
-        self._resume_visible_blocks()
-        self.set_colors_from_settings_on_page()
-        self.restore_pending_terminal_split()
-        self.execute_hook("show")
-        return False
-
-    def _x11_post_hide(self):
-        """Follow-up work after X11 thread hid the window."""
-        self.hidden = True
-        self._pause_all_blocks()
-        return False
 
     def get_visibility(self):
         return 0 if self.hidden else 1
