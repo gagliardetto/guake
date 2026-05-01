@@ -391,10 +391,27 @@ class Guake(SimpleGladeApp):
         
         log.info("Guake initialized")
 
-        # Jank detector + GC monitor
-        self._jank_last = pytime.monotonic()
+        # With 300+ terminals, Python GC gen2 can stall 300-500ms.
+        # Disable automatic GC and run it manually during idle periods.
         import gc
         gc.callbacks.append(self._gc_callback)
+        gc.disable()
+        self._gc_counter = 0
+        def _manual_gc():
+            self._gc_counter += 1
+            # Only run gen0 (fast) every 5s, gen1 every 30s, gen2 every 120s
+            if self._gc_counter % 24 == 0:  # every 120s
+                gc.collect(2)
+            elif self._gc_counter % 6 == 0:  # every 30s
+                gc.collect(1)
+            else:  # every 5s
+                gc.collect(0)
+            return True
+        GLib.timeout_add_seconds(5, _manual_gc)
+        log.info("Automatic GC disabled — manual GC every 5/30/120s for gen0/1/2")
+
+        # Jank detector
+        self._jank_last = pytime.monotonic()
         def _jank_check():
             now = pytime.monotonic()
             delta = (now - self._jank_last) * 1000
@@ -411,9 +428,9 @@ class Guake(SimpleGladeApp):
             Guake._gc_start = _t.monotonic()
         elif phase == 'stop':
             elapsed = (_t.monotonic() - getattr(Guake, '_gc_start', _t.monotonic())) * 1000
-            if elapsed > 50:
-                log.warning("GC: gen%d took %.0fms (collected %d)",
-                            info.get('generation', -1), elapsed, info.get('collected', 0))
+            if elapsed > 10:
+                log.info("GC: gen%d took %.0fms (collected %d)",
+                         info.get('generation', -1), elapsed, info.get('collected', 0))
         self.is_starting_up = False
 
     def get_notebook(self):
