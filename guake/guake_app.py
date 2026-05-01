@@ -828,6 +828,9 @@ class Guake(SimpleGladeApp):
 
     def _x11_post_show(self):
         """GTK-side cleanup after X11 mapped the window."""
+        # Sync GTK's internal state — window is already visible via XMapRaised
+        self.window.show()
+        self.window.present()
         self.window.stick()
         RectCalculator.set_final_window_rect(self.settings, self.window)
         self.set_terminal_focus()
@@ -839,6 +842,7 @@ class Guake(SimpleGladeApp):
 
     def _x11_post_hide(self):
         """GTK-side cleanup after X11 unmapped the window."""
+        self.window.hide()  # sync GTK state
         self._last_hide_time = pytime.monotonic()
         self._pause_all_blocks()
         return False
