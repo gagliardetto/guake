@@ -438,7 +438,6 @@ class Guake(SimpleGladeApp):
             if elapsed > 10:
                 log.info("GC: gen%d took %.0fms (collected %d)",
                          info.get('generation', -1), elapsed, info.get('collected', 0))
-        self.is_starting_up = False
 
     def get_notebook(self):
         return self.notebook_manager.get_current_notebook()
