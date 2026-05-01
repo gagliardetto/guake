@@ -713,7 +713,8 @@ class Guake(SimpleGladeApp):
 
     def _setup_x11_hotkey_thread(self):
         """Start a background thread that grabs the hotkey via X11 directly.
-        Maps/unmaps the window via X11, bypassing the GTK main loop entirely."""
+        Uses a pipe + HIGH priority IO watch to dispatch show_hide before
+        VTE's fd processing, cutting main loop latency."""
         import threading
         try:
             import ctypes
@@ -724,8 +725,6 @@ class Guake(SimpleGladeApp):
                 return False
 
             xlib = ctypes.cdll.LoadLibrary(xlib_path)
-
-            # Declare proper ctypes signatures
             xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
             xlib.XOpenDisplay.restype = ctypes.c_void_p
             xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
@@ -737,24 +736,13 @@ class Guake(SimpleGladeApp):
             xlib.XNextEvent.restype = ctypes.c_int
             xlib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
             xlib.XSync.restype = ctypes.c_int
-            xlib.XMapRaised.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-            xlib.XMapRaised.restype = ctypes.c_int
-            xlib.XUnmapWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-            xlib.XUnmapWindow.restype = ctypes.c_int
-            xlib.XSetInputFocus.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
-                                             ctypes.c_int, ctypes.c_ulong]
-            xlib.XSetInputFocus.restype = ctypes.c_int
-            xlib.XFlush.argtypes = [ctypes.c_void_p]
-            xlib.XFlush.restype = ctypes.c_int
 
             display = xlib.XOpenDisplay(None)
             if not display:
                 log.warning("Cannot open X11 display for hotkey thread")
                 return False
-
             root = xlib.XDefaultRootWindow(display)
 
-            # Parse the hotkey
             key = self.settings.keybindingsGlobal.get_string("show-hide")
             if not key:
                 return False
@@ -774,7 +762,6 @@ class Guake(SimpleGladeApp):
             if mods & Gdk.ModifierType.MOD1_MASK: x11_mods |= 8
             if mods & Gdk.ModifierType.SUPER_MASK: x11_mods |= 64
 
-            # Ungrab from Keybinder
             self.hotkeys.unbind(key)
 
             GrabModeAsync = 1
@@ -784,17 +771,30 @@ class Guake(SimpleGladeApp):
                               root, True, GrabModeAsync, GrabModeAsync)
             xlib.XSync(display, False)
 
-            # Get X11 window ID
-            gdk_window = self.window.get_window()
-            if not gdk_window or not hasattr(gdk_window, 'get_xid'):
-                log.info("No XID available — using Keybinder")
-                return False
-            x11_wid = gdk_window.get_xid()
+            # Create a pipe — X11 thread writes to it, GLib IO watch reads from it
+            pipe_r, pipe_w = os.pipe()
+            os.set_blocking(pipe_r, False)
+            os.set_blocking(pipe_w, False)
 
-            log.info("X11 hotkey grab: key='%s' keycode=%d mods=%d wid=0x%x",
-                     key, x11_keycode, x11_mods, x11_wid)
+            # IO watch at PRIORITY_HIGH runs BEFORE VTE's IO watches (PRIORITY_DEFAULT)
+            import gi
+            channel = GLib.IOChannel.unix_new(pipe_r)
+            channel.set_encoding(None)
+            channel.set_buffered(False)
 
-            RevertToParent = 2
+            def _on_hotkey_pipe(channel, condition):
+                try:
+                    os.read(pipe_r, 64)  # drain pipe
+                except OSError:
+                    pass
+                self.show_hide()
+                return True
+
+            GLib.io_add_watch(channel, GLib.PRIORITY_HIGH,
+                              GLib.IOCondition.IN, _on_hotkey_pipe)
+
+            log.info("X11 hotkey grab: key='%s' keycode=%d mods=%d (pipe-based dispatch)",
+                     key, x11_keycode, x11_mods)
 
             def _x11_hotkey_loop():
                 event_buf = (ctypes.c_byte * 192)()
@@ -802,52 +802,22 @@ class Guake(SimpleGladeApp):
                     try:
                         xlib.XNextEvent(display, ctypes.byref(event_buf))
                         event_type = int.from_bytes(event_buf[0:4], byteorder='little')
-                        if event_type != KeyPress:
-                            continue
-
-                        if self.hidden:
-                            # Show: map window via X11 immediately (no main loop wait)
-                            xlib.XMapRaised(display, x11_wid)
-                            xlib.XSetInputFocus(display, x11_wid, RevertToParent,
-                                                ctypes.c_ulong(0))
-                            xlib.XFlush(display)
-                            # Post-show cleanup on main thread
-                            GLib.idle_add(self._x11_post_show, priority=GLib.PRIORITY_HIGH)
-                        else:
-                            # Hide: unmap window via X11 immediately
-                            xlib.XUnmapWindow(display, x11_wid)
-                            xlib.XFlush(display)
-                            GLib.idle_add(self._x11_post_hide, priority=GLib.PRIORITY_HIGH)
+                        if event_type == KeyPress:
+                            try:
+                                os.write(pipe_w, b'\x01')
+                            except OSError:
+                                pass
                     except Exception as e:
                         log.error("X11 hotkey thread error: %s", e)
                         break
 
             t = threading.Thread(target=_x11_hotkey_loop, daemon=True)
             t.start()
-            log.info("X11 direct hotkey thread started — window map/unmap bypasses GTK")
+            log.info("X11 direct hotkey thread started (pipe fd=%d→%d)", pipe_w, pipe_r)
             return True
         except Exception as e:
             log.warning("X11 hotkey setup failed: %s — using Keybinder", e)
             return False
-
-    def _x11_post_show(self):
-        """GTK-side follow-up after X11 thread mapped the window."""
-        self.hidden = False
-        self.window.stick()
-        RectCalculator.set_final_window_rect(self.settings, self.window)
-        self.set_terminal_focus()
-        self._resume_visible_blocks()
-        self.set_colors_from_settings_on_page()
-        self.restore_pending_terminal_split()
-        self.execute_hook("show")
-        return False
-
-    def _x11_post_hide(self):
-        """GTK-side follow-up after X11 thread unmapped the window."""
-        self.hidden = True
-        self._last_hide_time = pytime.monotonic()
-        self._pause_all_blocks()
-        return False
 
     def get_visibility(self):
         return 0 if self.hidden else 1
