@@ -416,7 +416,7 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             fifo_path = getattr(terminal, 'block_fifo_path', None)
             if fifo_path:
                 self._block_fifo_reader = BlockFIFOReader(
-                    fifo_path, self.block_model, self._on_block_event
+                    fifo_path, self.block_model, self._on_block_event, terminal=terminal
                 )
                 self._block_fifo_reader.start()
                 log.info("FIFO reader started: %s", fifo_path)
@@ -448,6 +448,8 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
 
     def _on_terminal_contents_changed(self, terminal):
         """Forward new terminal output to regex watchers."""
+        if not terminal.get_mapped():
+            return
         guake = self.get_guake()
         if not guake or not hasattr(guake, 'notification_center'):
             return

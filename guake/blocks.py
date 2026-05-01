@@ -175,10 +175,11 @@ class BlockModel:
 class BlockFIFOReader:
     """Reads block events from a shell integration FIFO."""
 
-    def __init__(self, fifo_path, block_model, on_event_callback=None):
+    def __init__(self, fifo_path, block_model, on_event_callback=None, terminal=None):
         self.fifo_path = fifo_path
         self.block_model = block_model
         self.on_event = on_event_callback
+        self._terminal_ref = terminal
         self._fd = None
         self._poll_id = None
         self._buffer = ""
@@ -218,6 +219,9 @@ class BlockFIFOReader:
         """Read available data from the FIFO fd and process events."""
         if self._fd is None:
             return False
+        # Skip polling for terminals not currently visible
+        if hasattr(self, '_terminal_ref') and self._terminal_ref and not self._terminal_ref.get_mapped():
+            return True  # keep timer but skip work
         try:
             data = os.read(self._fd, 4096)
             if data:
@@ -349,6 +353,9 @@ class BlockOverlay:
 
     def _on_draw(self, terminal, cr):
         """Draw block decorations."""
+        # Skip drawing for terminals not currently visible (hidden pages)
+        if not terminal.get_mapped():
+            return False
         if not self.block_model.blocks:
             return False
 
