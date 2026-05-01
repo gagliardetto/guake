@@ -397,7 +397,7 @@ class Guake(SimpleGladeApp):
             now = pytime.monotonic()
             delta = (now - self._jank_last) * 1000
             if delta > 200:
-                log.warning("JANK: main loop stalled for %.0fms", delta)
+                log.warning("JANK: %.0fms stall", delta)
             self._jank_last = now
             return True
         GLib.timeout_add(100, _jank_check)
@@ -1178,6 +1178,7 @@ class Guake(SimpleGladeApp):
 
     def _save_tabs_now(self, filename="session.json"):
         """Immediately writes tab session data to disk."""
+        _t0 = pytime.monotonic()
         self._save_tabs_timer_id = None
         # Don't save during session restore
         if self.is_restoring_session:
@@ -1197,6 +1198,9 @@ class Guake(SimpleGladeApp):
         config_dir = self.get_xdg_config_directory()
         config_dir.mkdir(parents=True, exist_ok=True)
         (config_dir / filename).write_text(json.dumps(config, ensure_ascii=False, indent=4), encoding="utf-8")
+        _elapsed = (pytime.monotonic() - _t0) * 1000
+        if _elapsed > 50:
+            log.warning("SLOW: _save_tabs_now took %.0fms", _elapsed)
         return False  # one-shot timer
 
     def flush_saves(self):

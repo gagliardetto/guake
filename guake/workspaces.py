@@ -476,6 +476,8 @@ class WorkspaceManager:
         Actually builds the listbox with workspace rows.
         Separates pinned workspaces and enables drag-and-drop.
         """
+        import time as _t
+        _t0 = _t.monotonic()
         self._rebuild_sidebar_id = None
         if hasattr(self, "scrolled_window"):
             self.widget.remove(self.scrolled_window)
@@ -542,6 +544,9 @@ class WorkspaceManager:
 
         self.widget.pack_start(self.scrolled_window, True, True, 0)
         self._update_toolbar()
+        _elapsed = (_t.monotonic() - _t0) * 1000
+        if _elapsed > 50:
+            log.warning("SLOW: _do_build_workspace_list took %.0fms", _elapsed)
 
     def _create_workspace_context_menu(self, ws_data):
         menu = Gtk.Menu()
