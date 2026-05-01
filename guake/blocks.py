@@ -191,12 +191,32 @@ class BlockFIFOReader:
             return False
         try:
             self._fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
-            self._poll_id = GLib.timeout_add(500, self._poll_fifo)
+            self._start_polling()
             log.info("Block FIFO reader started (polling 500ms): %s", self.fifo_path)
             return True
         except OSError as e:
             log.error("Failed to open block FIFO %s: %s", self.fifo_path, e)
             return False
+
+    def _start_polling(self):
+        if self._poll_id is None and self._fd is not None:
+            self._poll_id = GLib.timeout_add(500, self._poll_fifo)
+
+    def _stop_polling(self):
+        if self._poll_id is not None:
+            GLib.source_remove(self._poll_id)
+            self._poll_id = None
+
+    def pause(self):
+        """Stop polling (terminal hidden)."""
+        self._stop_polling()
+
+    def resume(self):
+        """Resume polling (terminal visible). Process any queued events."""
+        self._start_polling()
+        # Read anything that accumulated while paused
+        if self._fd is not None:
+            self._poll_fifo()
 
     def stop(self):
         """Stop polling and close the FIFO."""
@@ -219,9 +239,6 @@ class BlockFIFOReader:
         """Read available data from the FIFO fd and process events."""
         if self._fd is None:
             return False
-        # Skip polling for terminals not currently visible
-        if hasattr(self, '_terminal_ref') and self._terminal_ref and not self._terminal_ref.get_mapped():
-            return True  # keep timer but skip work
         try:
             data = os.read(self._fd, 4096)
             if data:

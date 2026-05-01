@@ -371,6 +371,16 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
         else:
             log.debug("ensure_blocks_initialized: no terminals found yet")
 
+    def pause_blocks(self):
+        """Stop block-related timers when this page is hidden."""
+        if self._block_fifo_reader:
+            self._block_fifo_reader.pause()
+
+    def resume_blocks(self):
+        """Resume block-related timers when this page becomes visible."""
+        if self._block_fifo_reader:
+            self._block_fifo_reader.resume()
+
     def _setup_blocks(self, terminal):
         """Initialize block model, overlay, and inline editor for this terminal.
         Called once when the first terminal gets focus."""

@@ -631,7 +631,33 @@ class Guake(SimpleGladeApp):
         self.set_colors_from_settings_on_page()
         self.restore_pending_terminal_split()
         self.execute_hook("show")
+        # Resume block timers only for the current workspace's visible pages
+        self._resume_visible_blocks()
         return False  # don't repeat
+
+    def _pause_all_blocks(self):
+        """Pause block timers on ALL terminals."""
+        for nb_key, nb in self.notebook_manager.get_notebooks().items():
+            for i in range(nb.get_n_pages()):
+                page = nb.get_nth_page(i)
+                if hasattr(page, 'pause_blocks'):
+                    page.pause_blocks()
+        # Also pause the git status refresh
+        if self.workspace_manager:
+            self.workspace_manager._stop_refresh_timer()
+
+    def _resume_visible_blocks(self):
+        """Resume block timers only for visible pages."""
+        nb = self.get_notebook()
+        if not nb:
+            return
+        for i in range(nb.get_n_pages()):
+            page = nb.get_nth_page(i)
+            if page.get_visible() and hasattr(page, 'resume_blocks'):
+                page.resume_blocks()
+        # Resume git status refresh
+        if self.workspace_manager:
+            self.workspace_manager._start_refresh_timer()
 
     def show_hide(self, *args):
         _now = pytime.monotonic()
@@ -709,6 +735,8 @@ class Guake(SimpleGladeApp):
         if not HidePrevention(self.window).may_hide():
             return
         self.hidden = True
+        # Pause all block timers to reduce main loop overhead while hidden
+        self._pause_all_blocks()
         self.get_widget("window-root").unstick()
         self.window.hide()
         self.notebook_manager.get_current_notebook().popover.hide()
@@ -1369,10 +1397,11 @@ class Guake(SimpleGladeApp):
                 if terms:
                     page_map[str(terms[0].uuid)] = p
 
-            # Hide all pages and stop their activity timers to avoid
-            # hundreds of useless poll callbacks from hidden workspaces
+            # Hide all pages and pause their block timers
             for page in all_pages:
                 page.hide()
+                if hasattr(page, 'pause_blocks'):
+                    page.pause_blocks()
                 tab_label = notebook.get_tab_label(page)
                 if hasattr(tab_label, 'set_activity'):
                     tab_label.set_activity(False)
@@ -1391,7 +1420,8 @@ class Guake(SimpleGladeApp):
             for page in pages_in_ws_ordered:
                 page.set_no_show_all(False)
                 page.show_all()
-                # Initialize blocks for pages that were created in quiet mode
+                if hasattr(page, 'resume_blocks'):
+                    page.resume_blocks()
                 if hasattr(page, 'ensure_blocks_initialized'):
                     page.ensure_blocks_initialized()
 
