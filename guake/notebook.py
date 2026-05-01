@@ -751,43 +751,40 @@ class TerminalNotebook(Gtk.Notebook):
         self.delete_page(self.get_current_page(), kill, prompt)
 
     def _save_closed_tab(self, page, page_num):
-        """Save tab info before closing for undo-close-tab."""
+        """Save tab info before closing for undo-close-tab.
+        Saves the same format as session.json so restore is complete."""
         try:
-            terminals = page.get_terminals()
-            if not terminals:
-                return
+            # Save full pane layout (handles splits)
+            panes = []
+            page.save_box_layout(page.child, panes)
 
-            terminal = terminals[0]
-            cwd = terminal.get_current_directory() if hasattr(terminal, 'get_current_directory') else None
-            term_uuid = getattr(terminal, 'uuid', None)
+            # Get tab label and custom flag
+            label_text = self.get_tab_text_index(page_num) or ""
+            custom_label = getattr(page, "custom_label_set", False)
 
-            # Get tab label
-            tab_label = self.get_tab_label(page)
-            label_text = ""
-            if hasattr(tab_label, 'get_label_text'):
-                label_text = tab_label.get_label_text()
-            elif hasattr(tab_label, 'get_text'):
-                label_text = tab_label.get_text()
-
-            # Find which workspace this terminal belongs to
+            # Find workspace
             workspace_id = None
-            if hasattr(self, 'guake') and self.guake and hasattr(self.guake, 'workspace_manager'):
-                wm = self.guake.workspace_manager
-                for ws in wm.workspaces_data.get("workspaces", []):
-                    if term_uuid and term_uuid in ws.get("terminals", []):
-                        workspace_id = ws["id"]
-                        break
+            terminals = page.get_terminals()
+            if terminals and hasattr(self, 'guake') and self.guake:
+                term_uuid = getattr(terminals[0], 'uuid', None)
+                if term_uuid and hasattr(self.guake, 'workspace_manager'):
+                    for ws in self.guake.workspace_manager.workspaces_data.get("workspaces", []):
+                        if str(term_uuid) in ws.get("terminals", []):
+                            workspace_id = ws["id"]
+                            break
 
             entry = {
-                'cwd': cwd or os.path.expanduser('~'),
+                'panes': panes,
                 'label': label_text,
+                'custom_label_set': custom_label,
                 'workspace_id': workspace_id,
                 'page_num': page_num,
             }
             self._closed_tabs.append(entry)
             if len(self._closed_tabs) > 20:
                 self._closed_tabs = self._closed_tabs[-20:]
-            log.info("Saved closed tab for undo: %s (cwd=%s)", label_text, cwd)
+            log.info("Saved closed tab for undo: %s (panes=%d, workspace=%s)",
+                     label_text, len(panes), workspace_id)
         except Exception as e:
             log.warning("Failed to save closed tab info: %s", e)
 
@@ -798,18 +795,26 @@ class TerminalNotebook(Gtk.Notebook):
             return False
 
         entry = self._closed_tabs.pop()
-        cwd = entry.get('cwd', os.path.expanduser('~'))
+        panes = entry.get('panes', [])
         label = entry.get('label', '')
+        custom_label = entry.get('custom_label_set', False)
         workspace_id = entry.get('workspace_id')
         position = entry.get('page_num')
 
-        # If the tab belonged to a workspace, switch to it first
+        # Get CWD from first terminal pane
+        cwd = os.path.expanduser('~')
+        for pane in panes:
+            if pane.get('type') == 'term' and pane.get('directory'):
+                cwd = pane['directory']
+                break
+
+        # Switch to correct workspace if needed
         if workspace_id and hasattr(self, 'guake') and self.guake:
             active_ws = self.guake.workspace_manager.workspaces_data.get("active_workspace")
             if active_ws != workspace_id:
                 self.guake.switch_to_workspace(workspace_id)
 
-        # Clamp position to current page count
+        # Clamp position
         n_pages = self.get_n_pages()
         if position is None or position > n_pages:
             position = n_pages
@@ -817,26 +822,47 @@ class TerminalNotebook(Gtk.Notebook):
         # Create the new tab
         self.new_page_with_focus(directory=cwd, position=position)
 
-        # Restore the label if it was custom
-        if label and label != "Terminal":
-            self.rename_page(position, label, user_set=True)
+        page = self.get_nth_page(position)
+        if not page:
+            return True
+
+        # Restore splits if the saved layout had them
+        if len(panes) > 1 and any(p.get('type', '').startswith('dual') for p in panes):
+            try:
+                terminals = page.get_terminals()
+                if terminals:
+                    term_box = terminals[0].get_parent()
+                    if term_box:
+                        page.restore_box_layout(term_box, list(panes))
+            except Exception as e:
+                log.warning("Failed to restore split layout: %s", e)
+
+        # Restore custom colors on terminals
+        for terminal in page.get_terminals():
+            for pane in panes:
+                if pane.get('custom_colors'):
+                    terminal.set_custom_colors_from_dict(pane['custom_colors'])
+                    break
+
+        # Restore the label
+        if label and (custom_label or label != "Terminal"):
+            self.rename_page(position, label, user_set=bool(custom_label))
 
         # Register terminal in workspace
         if workspace_id and hasattr(self, 'guake') and self.guake:
-            page = self.get_nth_page(position)
-            if page:
-                terminals = page.get_terminals()
-                if terminals:
-                    term_uuid = getattr(terminals[0], 'uuid', None)
-                    if term_uuid:
-                        wm = self.guake.workspace_manager
-                        for ws in wm.workspaces_data.get("workspaces", []):
-                            if ws["id"] == workspace_id:
-                                if term_uuid not in ws.get("terminals", []):
-                                    ws.setdefault("terminals", []).append(term_uuid)
-                                break
+            terminals = page.get_terminals()
+            if terminals:
+                wm = self.guake.workspace_manager
+                for ws in wm.workspaces_data.get("workspaces", []):
+                    if ws["id"] == workspace_id:
+                        for t in terminals:
+                            term_uuid = str(getattr(t, 'uuid', ''))
+                            if term_uuid and term_uuid not in ws.get("terminals", []):
+                                ws.setdefault("terminals", []).append(term_uuid)
+                        break
 
-        log.info("Restored closed tab: %s (cwd=%s)", label, cwd)
+        log.info("Restored closed tab: %s (cwd=%s, splits=%d)",
+                 label, cwd, len(panes))
         return True
 
     def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None, quiet=False):
