@@ -18,6 +18,8 @@ Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
 Boston, MA 02110-1301 USA
 """
 
+import os
+
 from guake.about import AboutDialog
 from guake.boxes import RootTerminalBox
 from guake.boxes import TabLabelEventBox
@@ -265,6 +267,7 @@ class TerminalNotebook(Gtk.Notebook):
     def __init__(self, *args, **kwargs):
         Gtk.Notebook.__init__(self, *args, **kwargs)
         self.last_terminal_focused = None
+        self._closed_tabs = []  # Stack for undo-close-tab (max 20)
 
         self.set_name("notebook-teminals")
         self.set_tab_pos(Gtk.PositionType.BOTTOM)
@@ -711,13 +714,13 @@ class TerminalNotebook(Gtk.Notebook):
             return
 
         page = self.get_nth_page(page_num)
-        # TODO NOTEBOOK it would be nice if none of the "ui" stuff
-        # (PromptQuitDialog) would be in here
         procs = self.get_running_fg_processes_page(page)
         if prompt == PROMPT_ALWAYS or (prompt == PROMPT_PROCESSES and procs):
-            # TODO NOTEBOOK remove call to guake
             if not PromptQuitDialog(self.guake.window, procs, -1, None).close_tab():
                 return
+
+        # Save tab info for undo before destroying
+        self._save_closed_tab(page, page_num)
 
         for terminal in page.get_terminals():
             if kill:
@@ -725,15 +728,6 @@ class TerminalNotebook(Gtk.Notebook):
             terminal.destroy()
 
         if self.get_nth_page(page_num) is page:
-            # NOTE: GitHub issue #1438
-            # Previous line `terminal.destroy()` will finally called `on_terminal_exited`,
-            # and called `RootTerminalBox.remove_dead_child`, then called `remove_page`.
-            #
-            # But in some cases (e.g. #1438), it will not remove the page by
-            # `terminal.destory() chain`.
-            #
-            # Check this by compare same page_num page with previous saved page instance,
-            # and remove the page if it really didn't remove it.
             self.remove_page(page_num)
 
     @save_tabs_when_changed
@@ -755,6 +749,95 @@ class TerminalNotebook(Gtk.Notebook):
 
     def delete_page_current(self, kill=True, prompt=0):
         self.delete_page(self.get_current_page(), kill, prompt)
+
+    def _save_closed_tab(self, page, page_num):
+        """Save tab info before closing for undo-close-tab."""
+        try:
+            terminals = page.get_terminals()
+            if not terminals:
+                return
+
+            terminal = terminals[0]
+            cwd = terminal.get_current_directory() if hasattr(terminal, 'get_current_directory') else None
+            term_uuid = getattr(terminal, 'uuid', None)
+
+            # Get tab label
+            tab_label = self.get_tab_label(page)
+            label_text = ""
+            if hasattr(tab_label, 'get_label_text'):
+                label_text = tab_label.get_label_text()
+            elif hasattr(tab_label, 'get_text'):
+                label_text = tab_label.get_text()
+
+            # Find which workspace this terminal belongs to
+            workspace_id = None
+            if hasattr(self, 'guake') and self.guake and hasattr(self.guake, 'workspace_manager'):
+                wm = self.guake.workspace_manager
+                for ws in wm.workspaces_data.get("workspaces", []):
+                    if term_uuid and term_uuid in ws.get("terminals", []):
+                        workspace_id = ws["id"]
+                        break
+
+            entry = {
+                'cwd': cwd or os.path.expanduser('~'),
+                'label': label_text,
+                'workspace_id': workspace_id,
+                'page_num': page_num,
+            }
+            self._closed_tabs.append(entry)
+            if len(self._closed_tabs) > 20:
+                self._closed_tabs = self._closed_tabs[-20:]
+            log.info("Saved closed tab for undo: %s (cwd=%s)", label_text, cwd)
+        except Exception as e:
+            log.warning("Failed to save closed tab info: %s", e)
+
+    def undo_close_tab(self):
+        """Restore the most recently closed tab."""
+        if not self._closed_tabs:
+            log.info("No closed tabs to restore")
+            return False
+
+        entry = self._closed_tabs.pop()
+        cwd = entry.get('cwd', os.path.expanduser('~'))
+        label = entry.get('label', '')
+        workspace_id = entry.get('workspace_id')
+        position = entry.get('page_num')
+
+        # If the tab belonged to a workspace, switch to it first
+        if workspace_id and hasattr(self, 'guake') and self.guake:
+            active_ws = self.guake.workspace_manager.workspaces_data.get("active_workspace")
+            if active_ws != workspace_id:
+                self.guake.switch_to_workspace(workspace_id)
+
+        # Clamp position to current page count
+        n_pages = self.get_n_pages()
+        if position is None or position > n_pages:
+            position = n_pages
+
+        # Create the new tab
+        self.new_page_with_focus(directory=cwd, position=position)
+
+        # Restore the label if it was custom
+        if label and label != "Terminal":
+            self.rename_page(position, label, user_set=True)
+
+        # Register terminal in workspace
+        if workspace_id and hasattr(self, 'guake') and self.guake:
+            page = self.get_nth_page(position)
+            if page:
+                terminals = page.get_terminals()
+                if terminals:
+                    term_uuid = getattr(terminals[0], 'uuid', None)
+                    if term_uuid:
+                        wm = self.guake.workspace_manager
+                        for ws in wm.workspaces_data.get("workspaces", []):
+                            if ws["id"] == workspace_id:
+                                if term_uuid not in ws.get("terminals", []):
+                                    ws.setdefault("terminals", []).append(term_uuid)
+                                break
+
+        log.info("Restored closed tab: %s (cwd=%s)", label, cwd)
+        return True
 
     def new_page(self, directory=None, position=None, empty=False, open_tab_cwd=False, terminal_uuid=None, quiet=False):
         terminal_box = TerminalBox()

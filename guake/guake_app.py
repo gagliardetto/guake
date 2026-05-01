@@ -1225,6 +1225,9 @@ class Guake(SimpleGladeApp):
     def close_tab(self, *args):
         self.get_notebook().delete_page_current(prompt=self.settings.general.get_int("prompt-on-close-tab"))
 
+    def accel_undo_close_tab(self, *args):
+        self.get_notebook().undo_close_tab()
+
     def rename_tab_uuid(self, term_uuid, new_text, user_set=True):
         try:
             term_uuid = uuid.UUID(term_uuid)

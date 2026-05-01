@@ -568,6 +568,11 @@
             <summary>Closes the current tab.</summary>
             <description>Accelerator to active function that closes the current selected tab.</description>
         </key>
+        <key name="undo-close-tab" type="s">
+            <default>'&lt;Control&gt;&lt;Shift&gt;t'</default>
+            <summary>Reopens the last closed tab.</summary>
+            <description>Accelerator to restore the most recently closed tab with its working directory.</description>
+        </key>
         <key name="search-on-web" type="s">
             <default>'&lt;Control&gt;&lt;Shift&gt;l'</default>
             <summary>Search current selected text on the web</summary>

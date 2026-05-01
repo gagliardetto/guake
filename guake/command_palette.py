@@ -199,8 +199,10 @@ class CommandPalette(Gtk.Window):
 
         # General commands
         cmds.extend([
-            {"name": "New Tab", "category": "Tabs", "shortcut": "Ctrl+Shift+T",
+            {"name": "New Tab", "category": "Tabs",
              "action": lambda: self.guake.accel_add(None, None)},
+            {"name": "Undo Close Tab", "category": "Tabs", "shortcut": "Ctrl+Shift+T",
+             "action": lambda: self.guake.accel_undo_close_tab()},
             {"name": "Close Tab", "category": "Tabs",
              "action": lambda: self.guake.close_tab()},
             {"name": "Rename Tab", "category": "Tabs",
