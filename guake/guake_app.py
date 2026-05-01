@@ -399,45 +399,21 @@ class Guake(SimpleGladeApp):
             return False
         GLib.timeout_add(500, _deferred_x11_setup)
 
-        # With 300+ terminals, Python GC gen2 can stall 300-500ms.
-        # Disable automatic GC and run it manually during idle periods.
+        # With 300+ terminals, disable automatic GC (gen2 can stall).
+        # Run manually on a relaxed schedule.
         import gc
-        gc.callbacks.append(self._gc_callback)
         gc.disable()
         self._gc_counter = 0
         def _manual_gc():
             self._gc_counter += 1
-            # Only run gen0 (fast) every 5s, gen1 every 30s, gen2 every 120s
-            if self._gc_counter % 24 == 0:  # every 120s
+            if self._gc_counter % 24 == 0:
                 gc.collect(2)
-            elif self._gc_counter % 6 == 0:  # every 30s
+            elif self._gc_counter % 6 == 0:
                 gc.collect(1)
-            else:  # every 5s
+            else:
                 gc.collect(0)
             return True
         GLib.timeout_add_seconds(5, _manual_gc)
-        log.info("Automatic GC disabled — manual GC every 5/30/120s for gen0/1/2")
-
-        # Jank detector
-        self._jank_last = pytime.monotonic()
-        def _jank_check():
-            now = pytime.monotonic()
-            delta = (now - self._jank_last) * 1000
-            if delta > 200:
-                log.warning("JANK: %.0fms stall", delta)
-            self._jank_last = now
-            return True
-        GLib.timeout_add(100, _jank_check)
-
-    @staticmethod
-    def _gc_callback(phase, info):
-        if phase == 'start':
-            Guake._gc_start = pytime.monotonic()
-        elif phase == 'stop':
-            elapsed = (pytime.monotonic() - getattr(Guake, '_gc_start', pytime.monotonic())) * 1000
-            if elapsed > 10:
-                log.info("GC: gen%d took %.0fms (collected %d)",
-                         info.get('generation', -1), elapsed, info.get('collected', 0))
 
     def get_notebook(self):
         return self.notebook_manager.get_current_notebook()
@@ -690,12 +666,6 @@ class Guake(SimpleGladeApp):
                 page.resume_blocks()
 
     def show_hide(self, *args):
-        _now = pytime.monotonic()
-        if hasattr(self, '_last_hide_time'):
-            log.info("HOTKEY LAG: %.0fms since hide",
-                     (_now - self._last_hide_time) * 1000)
-        self._last_showhide_time = _now
-
         if self.forceHide:
             self.forceHide = False
             return
@@ -1376,7 +1346,6 @@ class Guake(SimpleGladeApp):
 
     def _save_tabs_now(self, filename="session.json"):
         """Immediately writes tab session data to disk."""
-        _t0 = pytime.monotonic()
         self._save_tabs_timer_id = None
         # Don't save during session restore
         if self.is_restoring_session:
@@ -1396,9 +1365,6 @@ class Guake(SimpleGladeApp):
         config_dir = self.get_xdg_config_directory()
         config_dir.mkdir(parents=True, exist_ok=True)
         (config_dir / filename).write_text(json.dumps(config, ensure_ascii=False, indent=4), encoding="utf-8")
-        _elapsed = (pytime.monotonic() - _t0) * 1000
-        if _elapsed > 50:
-            log.warning("SLOW: _save_tabs_now took %.0fms", _elapsed)
         return False  # one-shot timer
 
     def flush_saves(self):
