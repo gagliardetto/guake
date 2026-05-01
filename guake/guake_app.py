@@ -390,6 +390,17 @@ class Guake(SimpleGladeApp):
         GLib.timeout_add_seconds(1, self.update_tab_activity_indicators)
         
         log.info("Guake initialized")
+
+        # Jank detector — logs when main loop stalls >200ms
+        self._jank_last = pytime.monotonic()
+        def _jank_check():
+            now = pytime.monotonic()
+            delta = (now - self._jank_last) * 1000
+            if delta > 200:
+                log.warning("JANK: main loop stalled for %.0fms", delta)
+            self._jank_last = now
+            return True
+        GLib.timeout_add(100, _jank_check)
         self.is_starting_up = False
 
     def get_notebook(self):
@@ -623,6 +634,12 @@ class Guake(SimpleGladeApp):
         return False  # don't repeat
 
     def show_hide(self, *args):
+        _now = pytime.monotonic()
+        if hasattr(self, '_last_hide_time'):
+            log.info("HOTKEY LAG: %.0fms since hide",
+                     (_now - self._last_hide_time) * 1000)
+        self._last_showhide_time = _now
+
         if self.forceHide:
             self.forceHide = False
             return
@@ -672,14 +689,10 @@ class Guake(SimpleGladeApp):
             self.add_tab()
         self.window.set_keep_below(False)
         self.window.move(window_rect.x, window_rect.y)
-        # Skip triggerOnChangedValue — RectCalculator already set the size above
         time = get_server_time(self.window)
-        self.window.present()
-        self.window.deiconify()
         self.window.show()
+        self.window.present_with_time(time)
         self.window.get_window().focus(time)
-        self.window.set_type_hint(Gdk.WindowTypeHint.DOCK)
-        self.window.set_type_hint(Gdk.WindowTypeHint.NORMAL)
         # Defer non-critical work to after the window is visible
         GLib.idle_add(self._post_show)
 
@@ -692,6 +705,7 @@ class Guake(SimpleGladeApp):
         self.show()
 
     def hide(self):
+        self._last_hide_time = pytime.monotonic()
         if not HidePrevention(self.window).may_hide():
             return
         self.hidden = True
