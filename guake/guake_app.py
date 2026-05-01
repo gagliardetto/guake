@@ -616,16 +616,24 @@ class Guake(SimpleGladeApp):
         self.fullscreen_manager.set_window_state(event.new_window_state)
 
     def show_hide(self, *args):
+        import time as _t
+        _t0 = _t.monotonic()
         if self.forceHide:
             self.forceHide = False
             return
         if not HidePrevention(self.window).may_hide() or not self.win_prepare():
             return
+        _t1 = _t.monotonic()
         if not self.window.get_property("visible"):
             self.show()
+            _t2 = _t.monotonic()
             server_time = get_server_time(self.window)
             self.window.get_window().focus(server_time)
+            _t3 = _t.monotonic()
             self.set_terminal_focus()
+            _t4 = _t.monotonic()
+            log.info("SHOW_HIDE TIMING: prepare=%.0fms show=%.0fms focus=%.0fms termfocus=%.0fms TOTAL=%.0fms",
+                     (_t1-_t0)*1000, (_t2-_t1)*1000, (_t3-_t2)*1000, (_t4-_t3)*1000, (_t4-_t0)*1000)
         elif self.settings.general.get_boolean("window-refocus") and not (self.window.get_window().get_state() & Gdk.WindowState.FOCUSED):
             server_time = get_server_time(self.window)
             self.window.get_window().focus(server_time)
@@ -660,26 +668,40 @@ class Guake(SimpleGladeApp):
                 self._failed_restore_page_split.append((root, box, panes))
 
     def show(self):
+        import time as _t
+        _t0 = _t.monotonic()
         self.hidden = False
         window_rect = RectCalculator.set_final_window_rect(self.settings, self.window)
+        _t1 = _t.monotonic()
         self.window.stick()
         if not self.get_notebook().has_page():
             self.add_tab()
         self.window.set_keep_below(False)
         self.window.move(window_rect.x, window_rect.y)
+        _t2 = _t.monotonic()
         if not self.fullscreen_manager.is_fullscreen():
             self.settings.general.triggerOnChangedValue(self.settings.general, "window-height")
+        _t3 = _t.monotonic()
         time = get_server_time(self.window)
         self.window.present()
         self.window.deiconify()
         self.window.show()
         self.window.get_window().focus(time)
+        _t4 = _t.monotonic()
         self.window.set_type_hint(Gdk.WindowTypeHint.DOCK)
         self.window.set_type_hint(Gdk.WindowTypeHint.NORMAL)
+        _t5 = _t.monotonic()
         # Re-apply colors only to the current page (not all hundreds of terminals)
         self.set_colors_from_settings_on_page()
+        _t6 = _t.monotonic()
         self.restore_pending_terminal_split()
+        _t7 = _t.monotonic()
         self.execute_hook("show")
+        _t8 = _t.monotonic()
+        log.info("SHOW TIMING: rect=%.0fms stick+move=%.0fms height=%.0fms present=%.0fms hints=%.0fms colors=%.0fms split=%.0fms hook=%.0fms TOTAL=%.0fms",
+                 (_t1-_t0)*1000, (_t2-_t1)*1000, (_t3-_t2)*1000, (_t4-_t3)*1000,
+                 (_t5-_t4)*1000, (_t6-_t5)*1000, (_t7-_t6)*1000, (_t8-_t7)*1000,
+                 (_t8-_t0)*1000)
 
     def hide_from_remote(self):
         self.forceHide = True
