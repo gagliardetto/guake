@@ -391,8 +391,10 @@ class Guake(SimpleGladeApp):
         
         log.info("Guake initialized")
 
-        # Jank detector — logs when main loop stalls >200ms
+        # Jank detector + GC monitor
         self._jank_last = pytime.monotonic()
+        import gc
+        gc.callbacks.append(self._gc_callback)
         def _jank_check():
             now = pytime.monotonic()
             delta = (now - self._jank_last) * 1000
@@ -401,6 +403,17 @@ class Guake(SimpleGladeApp):
             self._jank_last = now
             return True
         GLib.timeout_add(100, _jank_check)
+
+    @staticmethod
+    def _gc_callback(phase, info):
+        import time as _t
+        if phase == 'start':
+            Guake._gc_start = _t.monotonic()
+        elif phase == 'stop':
+            elapsed = (_t.monotonic() - getattr(Guake, '_gc_start', _t.monotonic())) * 1000
+            if elapsed > 50:
+                log.warning("GC: gen%d took %.0fms (collected %d)",
+                            info.get('generation', -1), elapsed, info.get('collected', 0))
         self.is_starting_up = False
 
     def get_notebook(self):
@@ -642,9 +655,6 @@ class Guake(SimpleGladeApp):
                 page = nb.get_nth_page(i)
                 if hasattr(page, 'pause_blocks'):
                     page.pause_blocks()
-        # Also pause the git status refresh
-        if self.workspace_manager:
-            self.workspace_manager._stop_refresh_timer()
 
     def _resume_visible_blocks(self):
         """Resume block timers only for visible pages."""
@@ -655,9 +665,6 @@ class Guake(SimpleGladeApp):
             page = nb.get_nth_page(i)
             if page.get_visible() and hasattr(page, 'resume_blocks'):
                 page.resume_blocks()
-        # Resume git status refresh
-        if self.workspace_manager:
-            self.workspace_manager._start_refresh_timer()
 
     def show_hide(self, *args):
         _now = pytime.monotonic()
