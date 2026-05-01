@@ -372,27 +372,14 @@ class RootTerminalBox(Gtk.Box, TerminalHolder):
             log.debug("ensure_blocks_initialized: no terminals found yet")
 
     def pause_blocks(self):
-        """Stop block-related timers and disconnect PTY when this page is hidden.
-        This removes VTE's GLib IO watch on the PTY fd, eliminating main loop overhead."""
+        """Stop block-related timers when this page is hidden."""
         if self._block_fifo_reader:
             self._block_fifo_reader.pause()
-        # Disconnect PTY from VTE — stops GLib from polling this terminal's fd
-        for terminal in self.iter_terminals():
-            if not hasattr(terminal, '_saved_pty'):
-                pty = terminal.get_pty()
-                if pty:
-                    terminal._saved_pty = pty
-                    terminal.set_pty(None)
 
     def resume_blocks(self):
-        """Resume block-related timers and reconnect PTY when this page becomes visible."""
+        """Resume block-related timers when this page becomes visible."""
         if self._block_fifo_reader:
             self._block_fifo_reader.resume()
-        # Reconnect PTY — VTE resumes monitoring this terminal's fd
-        for terminal in self.iter_terminals():
-            if hasattr(terminal, '_saved_pty') and terminal._saved_pty:
-                terminal.set_pty(terminal._saved_pty)
-                del terminal._saved_pty
 
     def _setup_blocks(self, terminal):
         """Initialize block model, overlay, and inline editor for this terminal.
