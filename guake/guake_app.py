@@ -785,8 +785,16 @@ class Guake(SimpleGladeApp):
                 return False
             x11_wid = gdk_window.get_xid()
 
-            # Sync hidden state with actual window visibility at setup time
-            self.hidden = not self.window.get_visible()
+            # Prime GTK window state: do one GTK show() so GTK knows the window
+            # exists, then immediately unmap via X11. After this, XMapRaised/
+            # XUnmapWindow can toggle without GTK state conflicts.
+            if self.hidden:
+                self.window.show()
+                self.window.present()
+                import ctypes as ct
+                xlib.XUnmapWindow(display, x11_wid)
+                xlib.XFlush(display)
+                log.info("X11 hotkey: primed GTK window state (show+unmap)")
 
             log.info("X11 hotkey grab: key='%s' keycode=%d mods=%d wid=0x%x hidden=%s",
                      key, x11_keycode, x11_mods, x11_wid, self.hidden)
@@ -828,9 +836,6 @@ class Guake(SimpleGladeApp):
 
     def _x11_post_show(self):
         """GTK-side cleanup after X11 mapped the window."""
-        # Sync GTK's internal state — window is already visible via XMapRaised
-        self.window.show()
-        self.window.present()
         self.window.stick()
         RectCalculator.set_final_window_rect(self.settings, self.window)
         self.set_terminal_focus()
@@ -842,7 +847,6 @@ class Guake(SimpleGladeApp):
 
     def _x11_post_hide(self):
         """GTK-side cleanup after X11 unmapped the window."""
-        self.window.hide()  # sync GTK state
         self._last_hide_time = pytime.monotonic()
         self._pause_all_blocks()
         return False
