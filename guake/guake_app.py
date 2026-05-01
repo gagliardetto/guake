@@ -423,11 +423,10 @@ class Guake(SimpleGladeApp):
 
     @staticmethod
     def _gc_callback(phase, info):
-        import time as _t
         if phase == 'start':
-            Guake._gc_start = _t.monotonic()
+            Guake._gc_start = pytime.monotonic()
         elif phase == 'stop':
-            elapsed = (_t.monotonic() - getattr(Guake, '_gc_start', _t.monotonic())) * 1000
+            elapsed = (pytime.monotonic() - getattr(Guake, '_gc_start', pytime.monotonic())) * 1000
             if elapsed > 10:
                 log.info("GC: gen%d took %.0fms (collected %d)",
                          info.get('generation', -1), elapsed, info.get('collected', 0))
