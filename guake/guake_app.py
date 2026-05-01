@@ -391,9 +391,13 @@ class Guake(SimpleGladeApp):
         
         log.info("Guake initialized")
 
-        # Try X11 direct hotkey — bypasses GTK main loop for instant response
-        # Falls back to Keybinder if X11 setup fails (e.g. Wayland)
-        self._using_x11_hotkey = self._setup_x11_hotkey_thread()
+        # Defer X11 hotkey setup until window is realized
+        self._using_x11_hotkey = False
+        def _deferred_x11_setup():
+            if self.window.get_window():
+                self._using_x11_hotkey = self._setup_x11_hotkey_thread()
+            return False
+        GLib.timeout_add(500, _deferred_x11_setup)
 
         # With 300+ terminals, Python GC gen2 can stall 300-500ms.
         # Disable automatic GC and run it manually during idle periods.
@@ -709,9 +713,7 @@ class Guake(SimpleGladeApp):
             self.hide()
 
     def _setup_x11_hotkey_thread(self):
-        """Start a background thread that grabs the hotkey via X11 directly.
-        This bypasses the GTK main loop, so the window appears instantly
-        even when VTE is processing 300+ PTY fds."""
+        """Start a background thread that grabs the hotkey via X11 directly."""
         import threading
         try:
             import ctypes
@@ -720,8 +722,33 @@ class Guake(SimpleGladeApp):
             if not xlib_path:
                 log.info("X11 library not found — using Keybinder for hotkey")
                 return False
+
             xlib = ctypes.cdll.LoadLibrary(xlib_path)
+
+            # Declare proper ctypes signatures to prevent segfaults
+            xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
             xlib.XOpenDisplay.restype = ctypes.c_void_p
+
+            xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            xlib.XDefaultRootWindow.restype = ctypes.c_ulong
+
+            xlib.XGrabKey.argtypes = [
+                ctypes.c_void_p,  # display
+                ctypes.c_int,     # keycode
+                ctypes.c_uint,    # modifiers
+                ctypes.c_ulong,   # grab_window
+                ctypes.c_int,     # owner_events
+                ctypes.c_int,     # pointer_mode
+                ctypes.c_int,     # keyboard_mode
+            ]
+            xlib.XGrabKey.restype = ctypes.c_int
+
+            xlib.XNextEvent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            xlib.XNextEvent.restype = ctypes.c_int
+
+            xlib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            xlib.XSync.restype = ctypes.c_int
+
             display = xlib.XOpenDisplay(None)
             if not display:
                 log.warning("Cannot open X11 display for hotkey thread")
@@ -742,6 +769,7 @@ class Guake(SimpleGladeApp):
             gdk_keymap = Gdk.Keymap.get_for_display(self.window.get_display())
             success, keys = gdk_keymap.get_entries_for_keyval(keyval)
             if not success or not keys:
+                log.warning("X11 hotkey: cannot map keyval %d", keyval)
                 return False
             x11_keycode = keys[0].keycode
 
@@ -768,17 +796,17 @@ class Guake(SimpleGladeApp):
                     root, True, GrabModeAsync, GrabModeAsync)
             xlib.XSync(display, False)
 
-            log.info("X11 hotkey grab: keycode=%d mods=%d", x11_keycode, x11_mods)
+            log.info("X11 hotkey grab: key='%s' keycode=%d mods=%d", key, x11_keycode, x11_mods)
 
             def _x11_hotkey_loop():
-                import ctypes as ct
-                event_buf = (ct.c_long * 24)()
+                # XEvent is 192 bytes on 64-bit (24 longs)
+                event_buf = (ctypes.c_byte * 192)()
                 while True:
                     try:
-                        xlib.XNextEvent(display, ct.byref(event_buf))
-                        if event_buf[0] == KeyPress:
-                            # GLib.idle_add with HIGH priority inserts before
-                            # VTE's IO watches (which use DEFAULT priority).
+                        xlib.XNextEvent(display, ctypes.byref(event_buf))
+                        # event type is the first c_int (4 bytes)
+                        event_type = int.from_bytes(event_buf[0:4], byteorder='little')
+                        if event_type == KeyPress:
                             GLib.idle_add(self.show_hide, priority=GLib.PRIORITY_HIGH)
                     except Exception as e:
                         log.error("X11 hotkey thread error: %s", e)
