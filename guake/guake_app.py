@@ -457,7 +457,7 @@ class Guake(SimpleGladeApp):
             self.window.set_app_paintable(True)
             self.window.transparency = True
             self.window.realize()
-            if self.window.get_property("visible"):
+            if not self.hidden:
                 self.hide()
                 self.show()
         else:
@@ -595,7 +595,7 @@ class Guake(SimpleGladeApp):
         if not HidePrevention(self.window).may_hide():
             return
         def hide_window_callback():
-            if window.get_property("visible") and self.settings.general.get_boolean("window-losefocus"):
+            if not self.hidden and self.settings.general.get_boolean("window-losefocus"):
                 self.losefocus_time = get_server_time(self.window)
                 log.info("Hiding on focus lose")
                 self.hide()
@@ -604,7 +604,7 @@ class Guake(SimpleGladeApp):
             def losefocus_callback():
                 sleep(0.3)
                 if not (self.window.get_property("has-toplevel-focus") and (self.takefocus_time - self.lazy_losefocus_time) > 0):
-                    if self.window.get_property("visible"):
+                    if not self.hidden:
                         GLib.idle_add(hide_window_callback)
             Thread(target=losefocus_callback, daemon=True).start()
         else:
@@ -671,7 +671,7 @@ class Guake(SimpleGladeApp):
             return
         if not HidePrevention(self.window).may_hide() or not self.win_prepare():
             return
-        if not self.window.get_property("visible"):
+        if self.hidden:
             self.show()
             self.set_terminal_focus()
         elif self.settings.general.get_boolean("window-refocus") and not (self.window.get_window().get_state() & Gdk.WindowState.FOCUSED):
@@ -769,6 +769,12 @@ class Guake(SimpleGladeApp):
             log.info("X11 hotkey grab: key='%s' keycode=%d mods=%d wid=0x%x hidden=%s",
                      key, x11_keycode, x11_mods, x11_wid, self.hidden)
 
+            # Store for show()/hide() to use
+            self._x11 = {
+                'xlib': xlib, 'display': display, 'wid': x11_wid,
+                'RevertToParent': 2,
+            }
+
             RevertToParent = 2
 
             def _x11_hotkey_loop():
@@ -842,7 +848,7 @@ class Guake(SimpleGladeApp):
     def restore_pending_terminal_split(self):
         self.pending_restore_page_split, self._failed_restore_page_split = self._failed_restore_page_split, []
         for root, box, panes in self.pending_restore_page_split:
-            if self.window.get_property("visible") and root.get_notebook() == self.notebook_manager.get_current_notebook():
+            if not self.hidden and root.get_notebook() == self.notebook_manager.get_current_notebook():
                 root.restore_box_layout(box, panes)
             else:
                 self._failed_restore_page_split.append((root, box, panes))
@@ -855,11 +861,19 @@ class Guake(SimpleGladeApp):
             self.add_tab()
         self.window.set_keep_below(False)
         self.window.move(window_rect.x, window_rect.y)
-        time = get_server_time(self.window)
-        self.window.show()
-        self.window.present_with_time(time)
-        self.window.get_window().focus(time)
-        # Defer non-critical work to after the window is visible
+        # Use X11 direct map if available (instant), else GTK (slower)
+        if hasattr(self, '_x11'):
+            import ctypes
+            x = self._x11
+            x['xlib'].XMapRaised(x['display'], x['wid'])
+            x['xlib'].XSetInputFocus(x['display'], x['wid'],
+                                     x['RevertToParent'], ctypes.c_ulong(0))
+            x['xlib'].XFlush(x['display'])
+        else:
+            time = get_server_time(self.window)
+            self.window.show()
+            self.window.present_with_time(time)
+            self.window.get_window().focus(time)
         GLib.idle_add(self._post_show)
 
     def hide_from_remote(self):
@@ -875,10 +889,15 @@ class Guake(SimpleGladeApp):
         if not HidePrevention(self.window).may_hide():
             return
         self.hidden = True
-        # Pause all block timers to reduce main loop overhead while hidden
         self._pause_all_blocks()
         self.get_widget("window-root").unstick()
-        self.window.hide()
+        # Use X11 direct unmap if available (instant), else GTK
+        if hasattr(self, '_x11'):
+            x = self._x11
+            x['xlib'].XUnmapWindow(x['display'], x['wid'])
+            x['xlib'].XFlush(x['display'])
+        else:
+            self.window.hide()
         self.notebook_manager.get_current_notebook().popover.hide()
 
     def force_move_if_shown(self):
